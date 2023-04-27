@@ -12,15 +12,15 @@ const VOCAB: usize = 32_000;
 const HIDDEN: usize = 4096;
 const INTERMEDIATE: usize = 11008;
 const NUM_HEADS: usize = 32;
-const NUM_LAYERS: usize = 32;
+pub const NUM_LAYERS: usize = 32;
 const HEAD_DIM: usize = HIDDEN / NUM_HEADS;
 const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
 
 type E = half::f16;
 
-struct RMSNorm {
-    weight: LazyTensor<(Const<HIDDEN>,), E>,
-    variance_epsilon: f64,
+pub struct RMSNorm {
+    pub weight: LazyTensor<(Const<HIDDEN>,), E>,
+    pub variance_epsilon: f64,
 }
 
 impl RMSNorm {
@@ -37,8 +37,8 @@ impl RMSNorm {
     }
 }
 
-struct RotaryEmbedding {
-    inv_freq: LazyTensor<Rank1<HEAD_DIM_OVER_2>, f32>,
+pub struct RotaryEmbedding {
+    pub inv_freq: LazyTensor<Rank1<HEAD_DIM_OVER_2>, f32>,
 }
 
 impl RotaryEmbedding {
@@ -93,12 +93,12 @@ impl RotaryEmbedding {
     }
 }
 
-struct Attention {
-    q_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
-    k_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
-    v_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
-    out_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
-    rotary_embed: RotaryEmbedding,
+pub struct Attention {
+    pub q_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
+    pub k_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
+    pub v_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
+    pub out_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
+    pub rotary_embed: RotaryEmbedding,
 }
 
 impl Attention {
@@ -147,10 +147,10 @@ impl Attention {
     }
 }
 
-struct MLP {
-    gate_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, E>,
-    down_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, E>,
-    up_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, E>,
+pub struct MLP {
+    pub gate_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, E>,
+    pub down_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, E>,
+    pub up_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, E>,
 }
 
 impl MLP {
@@ -168,11 +168,11 @@ impl MLP {
     }
 }
 
-struct DecoderLayer {
-    self_attn: Attention,
-    mlp: MLP,
-    input_layer_norm: RMSNorm,
-    post_attention_layer_norm: RMSNorm,
+pub struct DecoderLayer {
+    pub self_attn: Attention,
+    pub mlp: MLP,
+    pub input_layer_norm: RMSNorm,
+    pub post_attention_layer_norm: RMSNorm,
 }
 
 impl DecoderLayer {
@@ -189,10 +189,10 @@ impl DecoderLayer {
     }
 }
 
-struct Llama {
-    embed_tokens: LazyTensor<Rank2<VOCAB, HIDDEN>, E>,
-    layers: Vec<DecoderLayer>,
-    norm: RMSNorm,
+pub struct Llama {
+    pub embed_tokens: LazyTensor<Rank2<VOCAB, HIDDEN>, E>,
+    pub layers: Vec<DecoderLayer>,
+    pub norm: RMSNorm,
 }
 
 impl Llama {
@@ -210,8 +210,8 @@ impl Llama {
 }
 
 pub struct LlamaForCausalLM {
-    llama: Llama,
-    lm_head: LazyTensor<Rank2<HIDDEN, VOCAB>, E>,
+    pub llama: Llama,
+    pub lm_head: LazyTensor<Rank2<HIDDEN, VOCAB>, E>,
 }
 
 impl LlamaForCausalLM {

@@ -4,6 +4,7 @@ mod modeling;
 
 use std::io::Write;
 
+use loading::load_on_disk;
 use modeling::LlamaForCausalLM;
 
 fn get_prompt_from_cli() -> String {
@@ -18,6 +19,9 @@ fn main() {
     println!("Loading tokenizer...");
     println!("Downloading from huggingface...");
     println!("Loading model weights...");
+
+    let root = "./model";
+    let llama = load_on_disk(root);
 
     loop {
         let prompt = get_prompt_from_cli();

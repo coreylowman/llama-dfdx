@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 half = { git = "https://github.com/starkat99/half-rs.git", branch = "main", features = ["num-traits", "rand_distr"] }
 dfdx = { path = "../dfdx", default-features = false, features = ["std", "cuda", "ci-check", "f16"] }
+memmap2 = "0.5.10"
