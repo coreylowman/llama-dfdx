@@ -1,0 +1,10 @@
+[package]
+name = "llama-dfdx"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+half = { git = "https://github.com/starkat99/half-rs.git", branch = "main", features = ["num-traits", "rand_distr"] }
+dfdx = { path = "../dfdx", default-features = false, features = ["std", "cuda", "ci-check", "f16"] }
