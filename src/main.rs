@@ -20,12 +20,12 @@ fn main() {
     println!("Downloading from huggingface...");
     println!("Loading model weights...");
 
-    let root = "./model";
+    let root = "./model/exploded";
     let llama = load_on_disk(root);
-
-    loop {
-        let prompt = get_prompt_from_cli();
-        // let tokens = tokenize();
-        println!("I am bob");
-    }
+    std::println!("{:?}", llama);
+    // loop {
+    //     let prompt = get_prompt_from_cli();
+    //     // let tokens = tokenize();
+    //     println!("I am bob");
+    // }
 }

@@ -1,12 +1,17 @@
 use dfdx::{
     shapes::{HasShape, Shape, Unit},
-    tensor::{CopySlice, Cpu, Cuda, Tensor, TensorFromVec, ZerosTensor},
+    tensor::{CopySlice, Cpu, Tensor, TensorFromVec, ZerosTensor},
 };
 
+#[derive(Debug)]
 pub enum LazyTensor<S: Shape, E: Unit> {
-    Disk { path: std::path::PathBuf, shape: S },
+    Disk {
+        path: std::path::PathBuf,
+        shape: S,
+    },
     CPU(Tensor<S, E, Cpu>),
-    CUDA(Tensor<S, E, Cuda>),
+    #[cfg(feature = "cuda")]
+    CUDA(Tensor<S, E, dfdx::tenspr::Cuda>),
 }
 
 impl<S: Shape, E: Unit> LazyTensor<S, E> {
@@ -15,6 +20,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
         *self = Self::CPU(tensor);
     }
 
+    #[cfg(feature = "cuda")]
     pub fn load_into_cuda(&mut self, device: &Cuda) {
         let tensor = self.load_on(device);
         *self = Self::CUDA(tensor);
@@ -26,6 +32,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
         match self {
             Self::Disk { path: _, shape } => *shape,
             Self::CPU(tensor) => *tensor.shape(),
+            #[cfg(feature = "cuda")]
             Self::CUDA(tensor) => *tensor.shape(),
         }
     }
@@ -61,6 +68,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
                 // loaded.copy_from(&buf);
                 todo!()
             }
+            #[cfg(feature = "cuda")]
             Self::CUDA(tensor) => {
                 // TODO if `D` is Cuda, we can just clone this
                 todo!()

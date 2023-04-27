@@ -1,16 +1,16 @@
-use dfdx::tensor::{Cpu, Cuda};
-
 use super::lazy::LazyTensor;
 use super::modeling;
 use std::path::Path;
 
 macro_rules! disk_tensor {
-    ($Path:expr) => {
+    ($Path:expr) => {{
+        let path = $Path;
+        assert!(path.is_file(), "{:?} is not a file", path);
         LazyTensor::Disk {
-            path: $Path,
+            path,
             shape: Default::default(),
         }
-    };
+    }};
 }
 
 pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
@@ -25,14 +25,11 @@ pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
                 q_proj: disk_tensor!(layer_root.join("self_attn").join("q_proj").join("weight")),
                 k_proj: disk_tensor!(layer_root.join("self_attn").join("k_proj").join("weight")),
                 v_proj: disk_tensor!(layer_root.join("self_attn").join("v_proj").join("weight")),
-                out_proj: disk_tensor!(layer_root
-                    .join("self_attn")
-                    .join("out_proj")
-                    .join("weight")),
+                out_proj: disk_tensor!(layer_root.join("self_attn").join("o_proj").join("weight")),
                 rotary_embed: modeling::RotaryEmbedding {
                     inv_freq: disk_tensor!(layer_root
                         .join("self_attn")
-                        .join("rotary_embed")
+                        .join("rotary_emb")
                         .join("inv_freq")),
                 },
             },
@@ -42,11 +39,11 @@ pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
                 up_proj: disk_tensor!(layer_root.join("mlp").join("up_proj").join("weight")),
             },
             input_layer_norm: modeling::RMSNorm {
-                weight: disk_tensor!(layer_root.join("input_layer_norm").join("weight")),
+                weight: disk_tensor!(layer_root.join("input_layernorm").join("weight")),
                 variance_epsilon,
             },
             post_attention_layer_norm: modeling::RMSNorm {
-                weight: disk_tensor!(layer_root.join("post_attention_layer_norm").join("weight")),
+                weight: disk_tensor!(layer_root.join("post_attention_layernorm").join("weight")),
                 variance_epsilon,
             },
         });
@@ -60,14 +57,6 @@ pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
                 variance_epsilon,
             },
         },
-        lm_head: disk_tensor!(root.join("lm_head")),
+        lm_head: disk_tensor!(root.join("lm_head").join("weight")),
     }
-}
-
-pub fn load_into_cpu(llama: &mut modeling::LlamaForCausalLM, device: &Cpu) {
-    todo!();
-}
-
-pub fn load_into_cuda(llama: &mut modeling::LlamaForCausalLM, device: &Cuda) {
-    todo!();
 }
