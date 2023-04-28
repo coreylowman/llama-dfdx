@@ -1,14 +1,6 @@
-use dfdx::{
-    data::Arange,
-    nn::modules::*,
-    shapes::*,
-    tensor::{DeviceStorage, Tensor},
-    tensor_ops::*,
-};
-
-use dfdx::tensor_ops::TryConcatAlong;
-
 use super::lazy::LazyTensor;
+
+use dfdx::{data::Arange, shapes::*, tensor::Tensor, tensor_ops::*};
 
 const VOCAB: usize = 32_000;
 const HIDDEN: usize = 4096;

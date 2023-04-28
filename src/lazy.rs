@@ -3,6 +3,8 @@ use dfdx::{
     tensor::{CopySlice, Cpu, Tensor, TensorFromVec, ZerosTensor},
 };
 
+use std::any::TypeId;
+
 #[derive(Debug)]
 pub enum LazyTensor<S: Shape, E: Unit> {
     Disk {
@@ -11,7 +13,7 @@ pub enum LazyTensor<S: Shape, E: Unit> {
     },
     CPU(Tensor<S, E, Cpu>),
     #[cfg(feature = "cuda")]
-    CUDA(Tensor<S, E, dfdx::tenspr::Cuda>),
+    CUDA(Tensor<S, E, dfdx::tensor::Cuda>),
 }
 
 impl<S: Shape, E: Unit> LazyTensor<S, E> {
@@ -63,10 +65,16 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
                 loaded
             }
             Self::CPU(tensor) => {
-                // TODO if `D` is Cpu, we can just clone this
-                // let buf = tensor.as_vec();
-                // loaded.copy_from(&buf);
-                todo!()
+                if TypeId::of::<D>() == TypeId::of::<Cpu>() {
+                    // let t: Tensor<S, E, Cpu> = tensor.clone();
+                    // unsafe { std::mem::transmute(t) }
+                    todo!()
+                } else {
+                    let mut loaded = device.zeros_like(tensor.shape());
+                    let buf = tensor.as_vec();
+                    loaded.copy_from(&buf);
+                    loaded
+                }
             }
             #[cfg(feature = "cuda")]
             Self::CUDA(tensor) => {
