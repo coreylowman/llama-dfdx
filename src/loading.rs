@@ -3,8 +3,8 @@ use super::modeling;
 use std::path::Path;
 
 macro_rules! disk_tensor {
-    ($Path:expr) => {{
-        let path = $Path;
+    ($Root:expr, $($Part:expr),+) => {{
+        let path = $Root $(.join($Part))+;
         assert!(path.is_file(), "{:?} is not a file", path);
         LazyTensor::Disk {
             path,
@@ -17,46 +17,42 @@ pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
     let variance_epsilon = 1e-6;
     let root = root.as_ref();
     let model = root.join("model");
-    let mut layers = Vec::new();
-    for i in 0..modeling::NUM_LAYERS {
-        let layer_root = model.join("layers").join(std::format!("{i}"));
-        layers.push(modeling::DecoderLayer {
+    let layers = (0..modeling::NUM_LAYERS)
+        .map(|i| model.join("layers").join(std::format!("{i}")))
+        .map(|layer_root| modeling::DecoderLayer {
             self_attn: modeling::Attention {
-                q_proj: disk_tensor!(layer_root.join("self_attn").join("q_proj").join("weight")),
-                k_proj: disk_tensor!(layer_root.join("self_attn").join("k_proj").join("weight")),
-                v_proj: disk_tensor!(layer_root.join("self_attn").join("v_proj").join("weight")),
-                out_proj: disk_tensor!(layer_root.join("self_attn").join("o_proj").join("weight")),
+                q_proj: disk_tensor!(layer_root, "self_attn", "q_proj", "weight"),
+                k_proj: disk_tensor!(layer_root, "self_attn", "k_proj", "weight"),
+                v_proj: disk_tensor!(layer_root, "self_attn", "v_proj", "weight"),
+                out_proj: disk_tensor!(layer_root, "self_attn", "o_proj", "weight"),
                 rotary_embed: modeling::RotaryEmbedding {
-                    inv_freq: disk_tensor!(layer_root
-                        .join("self_attn")
-                        .join("rotary_emb")
-                        .join("inv_freq")),
+                    inv_freq: disk_tensor!(layer_root, "self_attn", "rotary_emb", "inv_freq"),
                 },
             },
             mlp: modeling::MLP {
-                gate_proj: disk_tensor!(layer_root.join("mlp").join("gate_proj").join("weight")),
-                down_proj: disk_tensor!(layer_root.join("mlp").join("down_proj").join("weight")),
-                up_proj: disk_tensor!(layer_root.join("mlp").join("up_proj").join("weight")),
+                gate_proj: disk_tensor!(layer_root, "mlp", "gate_proj", "weight"),
+                down_proj: disk_tensor!(layer_root, "mlp", "down_proj", "weight"),
+                up_proj: disk_tensor!(layer_root, "mlp", "up_proj", "weight"),
             },
             input_layer_norm: modeling::RMSNorm {
-                weight: disk_tensor!(layer_root.join("input_layernorm").join("weight")),
+                weight: disk_tensor!(layer_root, "input_layernorm", "weight"),
                 variance_epsilon,
             },
             post_attention_layer_norm: modeling::RMSNorm {
-                weight: disk_tensor!(layer_root.join("post_attention_layernorm").join("weight")),
+                weight: disk_tensor!(layer_root, "post_attention_layernorm", "weight"),
                 variance_epsilon,
             },
-        });
-    }
+        })
+        .collect();
     modeling::LlamaForCausalLM {
         llama: modeling::Llama {
-            embed_tokens: disk_tensor!(model.join("embed_tokens").join("weight")),
+            embed_tokens: disk_tensor!(model, "embed_tokens", "weight"),
             layers,
             norm: modeling::RMSNorm {
-                weight: disk_tensor!(model.join("norm").join("weight")),
+                weight: disk_tensor!(model, "norm", "weight"),
                 variance_epsilon,
             },
         },
-        lm_head: disk_tensor!(root.join("lm_head").join("weight")),
+        lm_head: disk_tensor!(root, "lm_head", "weight"),
     }
 }
