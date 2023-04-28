@@ -2,29 +2,28 @@ mod lazy;
 mod loading;
 mod modeling;
 
-use std::io::Write;
-
-use dfdx::{shapes::*, tensor::*, tensor_ops::*};
+use dfdx::{tensor::*, tensor_ops::*};
 use loading::load_on_disk;
-use modeling::LlamaForCausalLM;
 
-fn get_prompt_from_cli() -> String {
-    let mut user_input = String::new();
-    std::print!("> ");
-    std::io::stdout().flush().unwrap();
-    std::io::stdin().read_line(&mut user_input).unwrap();
-    user_input
+use clap::Parser;
+
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Name of the person to greet
+    #[arg(short, long)]
+    model_root: String,
+
+    #[arg(short, long, default_value_t = 30)]
+    num_tokens: usize,
 }
 
 fn main() {
-    println!("Loading tokenizer...");
-    println!("Downloading from huggingface...");
-    println!("Loading model weights...");
-
-    let root = "../llama-7b-bytes";
-    let llama = load_on_disk(root);
+    let args = Args::parse();
+    let llama = load_on_disk(args.model_root);
     let dev: AutoDevice = Default::default();
-    let input_ids: Tensor<Rank2<1, 10>, usize, _> = dev.zeros();
+    let input_ids = dev.tensor([[0, 1000, 2000, 3000, 4000]]);
     let logits = llama.forward(input_ids);
     let vocab = logits.select(dev.tensor([9]));
     let logits = vocab.as_vec();
