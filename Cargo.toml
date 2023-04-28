@@ -9,6 +9,7 @@ edition = "2021"
 half = { git = "https://github.com/starkat99/half-rs.git", branch = "main", features = ["num-traits", "rand_distr"] }
 dfdx = { path = "../dfdx", default-features = false, features = ["std", "f16"] }
 memmap2 = "0.5.10"
+tokenizers = "0.13.3"
 
 [features]
 default = []

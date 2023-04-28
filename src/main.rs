@@ -8,6 +8,8 @@ use dfdx::{shapes::*, tensor::*, tensor_ops::*};
 use loading::load_on_disk;
 use modeling::LlamaForCausalLM;
 
+use tokenizers::tokenizer::{Result, Tokenizer};
+
 fn get_prompt_from_cli() -> String {
     let mut user_input = String::new();
     std::print!("> ");
@@ -17,14 +19,15 @@ fn get_prompt_from_cli() -> String {
 }
 
 fn main() {
-    println!("Loading tokenizer...");
-    println!("Downloading from huggingface...");
-    println!("Loading model weights...");
-
-    let root = "../llama-7b-bytes";
-    let llama = load_on_disk(root);
     let dev: AutoDevice = Default::default();
-    let input_ids: Tensor<Rank2<1, 10>, usize, _> = dev.zeros();
+    let tokenizer = Tokenizer::from_file("../llama-7b-hf/tokenizer_config.json").unwrap();
+    let llama = load_on_disk("../llama-7b-bytes");
+
+    let encoding = tokenizer.encode("Hey there!", false).unwrap();
+    let input_ids: Vec<usize> = encoding.get_ids().iter().map(|&x| x as usize).collect();
+    let seq_len = input_ids.len();
+    let input_ids = dev.tensor_from_vec(input_ids, (Const::<1>, seq_len));
+
     let logits = llama.forward(input_ids);
     let vocab = logits.select(dev.tensor([9]));
     let logits = vocab.as_vec();
