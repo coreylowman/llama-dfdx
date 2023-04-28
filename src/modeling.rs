@@ -19,16 +19,15 @@ pub struct RMSNorm {
 }
 
 impl RMSNorm {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E>>(
+    fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
         &self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
-        let weight = self.weight.load_on(x.device());
-        let (batch, seq, _) = *x.shape();
-        let variance = x.clone().square().mean::<(Batch, Seq), _>();
+        let x_f32 = x.clone().to_dtype::<f32>();
+        let variance = x_f32.square().mean::<(Batch, Seq), _>();
         let inv_std = (variance + self.variance_epsilon as f32).sqrt().recip();
-        let x = x * inv_std.broadcast_like(&(batch, seq, Const));
-        x * weight.broadcast_like(&(batch, seq, Const))
+        let x = inv_std.to_dtype::<E>().broadcast_like(&x) * x;
+        self.weight.load_on(x.device()).broadcast_like(&x) * x
     }
 }
 
@@ -47,8 +46,8 @@ impl RotaryEmbedding {
         Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
     ) {
         let (sin, cos) = self.get_sincos(q.device(), q.shape().2);
-        let cos = cos.broadcast_like(q.shape());
-        let sin = sin.broadcast_like(q.shape());
+        let sin = sin.broadcast_like(&q);
+        let cos = cos.broadcast_like(&q);
         let q_embed = (q.clone() * cos.clone()) + (Self::rotate_half(q) * sin.clone());
         let k_embed = (k.clone() * cos) + (Self::rotate_half(k) * sin);
         (q_embed, k_embed)
@@ -79,7 +78,7 @@ impl RotaryEmbedding {
         x: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
     ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D> {
         let x1 = x.clone().slice((.., .., .., ..HEAD_DIM_OVER_2));
-        let x2 = x.clone().slice((.., .., .., HEAD_DIM_OVER_2..));
+        let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..));
         (-x2, x1).concat_along(Axis::<3>).realize().unwrap()
     }
 }
@@ -98,52 +97,53 @@ impl Attention {
         &self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
-        let q_proj = self.q_proj.load_on(x.device());
-        let k_proj = self.k_proj.load_on(x.device());
-        let v_proj = self.v_proj.load_on(x.device());
-        let out_proj = self.out_proj.load_on(x.device());
-
         let (batch, seq, _) = *x.shape();
+        let bsnh = (batch, seq, Const::<NUM_HEADS>, Const::<HEAD_DIM>);
+        type Tr12 = Axes4<0, 2, 1, 3>;
 
-        let q = x
-            .clone()
-            .matmul(q_proj)
-            .reshape_like(&(batch, seq, Const::<NUM_HEADS>, Const::<HEAD_DIM>))
-            .unwrap()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-        let k = x
-            .clone()
-            .matmul(k_proj)
-            .reshape_like(&(batch, seq, Const::<NUM_HEADS>, Const::<HEAD_DIM>))
-            .unwrap()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
-        let v = x
-            .matmul(v_proj)
-            .reshape_like(&(batch, seq, Const::<NUM_HEADS>, Const::<HEAD_DIM>))
-            .unwrap()
-            .permute::<_, Axes4<0, 2, 1, 3>>();
+        let q = {
+            let q_proj = self.q_proj.load_on(x.device());
+            let q = x.clone().matmul(q_proj.permute());
+            q.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
+        };
+
+        let k = {
+            let k_proj = self.k_proj.load_on(x.device());
+            let k = x.clone().matmul(k_proj.permute());
+            k.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
+        };
+
+        let v = {
+            let v_proj = self.v_proj.load_on(x.device());
+            let v = x.matmul(v_proj.permute());
+            v.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
+        };
 
         let (q, k) = self.rotary_embed.forward(q, k);
 
-        let inv_head_scale: f32 = (HEAD_DIM as f32).sqrt().recip();
+        let inv_head_scale = (HEAD_DIM as f32).sqrt().recip();
         let attn_weights = q.matmul(k.permute::<_, Axes4<0, 1, 3, 2>>()) * inv_head_scale;
-        let attn_weights = attn_weights.softmax::<Axis<3>>();
-        let attn_output = attn_weights.matmul(v);
+        let attn_weights = attn_weights
+            .to_dtype::<f32>()
+            .softmax::<Axis<3>>()
+            .to_dtype::<E>();
 
+        let attn_output = attn_weights.matmul(v);
         let attn_output = attn_output
-            .permute::<_, Axes4<0, 2, 1, 3>>()
-            .reshape_like(&(batch, seq, Const))
+            .permute::<_, Tr12>()
+            .reshape_like(&(batch, seq, Const::<HIDDEN>))
             .unwrap();
 
-        attn_output.matmul(out_proj)
+        let out_proj = self.out_proj.load_on(attn_output.device());
+        attn_output.matmul(out_proj.permute())
     }
 }
 
 #[derive(Debug)]
 pub struct MLP {
-    pub gate_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, E>,
-    pub down_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, E>,
-    pub up_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, E>,
+    pub gate_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, E>,
+    pub down_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, E>,
+    pub up_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, E>,
 }
 
 impl MLP {
@@ -151,13 +151,17 @@ impl MLP {
         &self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
-        let gate_proj = self.gate_proj.load_on(x.device());
-        let down_proj = self.down_proj.load_on(x.device());
-        let up_proj = self.up_proj.load_on(x.device());
-        let gate = x.clone().matmul(gate_proj);
-        let silu = gate.clone() * gate.sigmoid();
-        let up = x.matmul(up_proj);
-        (up * silu).matmul(down_proj)
+        let up = {
+            let up_proj = self.up_proj.load_on(x.device());
+            x.clone().matmul(up_proj.permute())
+        };
+        let gate = {
+            let gate_proj = self.gate_proj.load_on(x.device());
+            x.matmul(gate_proj.permute())
+        };
+        let silu = up * gate.clone() * gate.sigmoid();
+        let down_proj = self.down_proj.load_on(silu.device());
+        silu.matmul(down_proj.permute())
     }
 }
 
@@ -195,8 +199,10 @@ impl Llama {
         &self,
         input_ids: Tensor<(Batch, Seq), usize, D>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
-        let embed_tokens = self.embed_tokens.load_on(input_ids.device());
-        let mut hidden_states = embed_tokens.gather(input_ids);
+        let mut hidden_states = {
+            let embed_tokens = self.embed_tokens.load_on(input_ids.device());
+            embed_tokens.gather(input_ids)
+        };
         for layer in self.layers.iter() {
             hidden_states = layer.forward(hidden_states);
         }
@@ -215,8 +221,8 @@ impl LlamaForCausalLM {
         &self,
         input_ids: Tensor<(Batch, Seq), usize, D>,
     ) -> Tensor<(Batch, Seq, Const<VOCAB>), E, D> {
-        let lm_head = self.lm_head.load_on(input_ids.device());
         let hidden_states = self.llama.forward(input_ids);
+        let lm_head = self.lm_head.load_on(hidden_states.device());
         hidden_states.matmul(lm_head)
     }
 }
