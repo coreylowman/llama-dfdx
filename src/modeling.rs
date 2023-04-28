@@ -19,15 +19,19 @@ pub struct RMSNorm {
 }
 
 impl RMSNorm {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E>>(
+    fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
         &self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
         let weight = self.weight.load_on(x.device());
         let (batch, seq, _) = *x.shape();
-        let variance = x.clone().square().mean::<(Batch, Seq), _>();
+        let variance = x
+            .clone()
+            .to_dtype::<f32>()
+            .square()
+            .mean::<(Batch, Seq), _>();
         let inv_std = (variance + self.variance_epsilon as f32).sqrt().recip();
-        let x = x * inv_std.broadcast_like(&(batch, seq, Const));
+        let x = x * inv_std.broadcast_like(&(batch, seq, Const)).to_dtype::<E>();
         x * weight.broadcast_like(&(batch, seq, Const))
     }
 }

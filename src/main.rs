@@ -20,17 +20,22 @@ fn get_prompt_from_cli() -> String {
 
 fn main() {
     let dev: AutoDevice = Default::default();
-    let tokenizer = Tokenizer::from_file("../llama-7b-hf/tokenizer_config.json").unwrap();
+    // let tokenizer = Tokenizer::from_file("../llama-7b-hf/tokenizer_config.json").unwrap();
     let llama = load_on_disk("../llama-7b-bytes");
 
-    let encoding = tokenizer.encode("Hey there!", false).unwrap();
-    let input_ids: Vec<usize> = encoding.get_ids().iter().map(|&x| x as usize).collect();
-    let seq_len = input_ids.len();
-    let input_ids = dev.tensor_from_vec(input_ids, (Const::<1>, seq_len));
+    // let encoding = tokenizer.encode("Hey there!", false).unwrap();
+    // let input_ids: Vec<usize> = encoding.get_ids().iter().map(|&x| x as usize).collect();
+    // let seq_len = input_ids.len();
+    // let input_ids = dev.tensor_from_vec(input_ids, (Const::<1>, seq_len));
+    let input_ids = dev.tensor([[
+        0, 1619, 1024, 338, 10239, 29891, 322, 306, 626, 263, 29871, 5819, 5819,
+    ]]);
 
     let logits = llama.forward(input_ids);
-    let vocab = logits.select(dev.tensor([9]));
+    // println!("{:?}", logits.as_vec());
+    let vocab = logits.select(dev.tensor([12]));
     let logits = vocab.as_vec();
+    // println!("{logits:?}");
     let new_token = logits
         .iter()
         .enumerate()
