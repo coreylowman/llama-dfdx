@@ -23,7 +23,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
     }
 
     #[cfg(feature = "cuda")]
-    pub fn load_into_cuda(&mut self, device: &Cuda) {
+    pub fn load_into_cuda(&mut self, device: &dfdx::tensor::Cuda) {
         let tensor = self.load_on(device);
         *self = Self::CUDA(tensor);
     }

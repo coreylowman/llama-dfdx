@@ -10,6 +10,8 @@ def main():
     args = parser.parse_args()
 
     for f in os.listdir(args.src):
+        if not f.endswith(".bin"):
+            continue
         sd = torch.load(os.path.join(args.src, f))
         for key, tensor in sd.items():
             print(key, tensor.shape, tensor.dtype)
