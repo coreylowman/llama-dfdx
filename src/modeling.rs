@@ -6,6 +6,8 @@ use dfdx::{
     tensor_ops::*,
 };
 
+use dfdx::tensor_ops::TryConcatAlong;
+
 use super::lazy::LazyTensor;
 
 const VOCAB: usize = 32_000;
@@ -71,16 +73,14 @@ impl RotaryEmbedding {
         let inv_freq = self.inv_freq.load_on(device);
         let t = device.arange(seq);
         let freqs = t.matmul(inv_freq);
-        let emb = {
-            // Implements `emb = torch.cat((freqs, freqs), dim=-1).to(x.device)`
-            let freqs = freqs.permute().realize::<(usize, usize)>().unwrap();
-            let emb = freqs.clone().concat(freqs);
-            emb.permute().realize::<(Seq, Const<HEAD_DIM>)>().unwrap()
-        };
-
+        let freqs = freqs.realize::<(usize, usize)>().unwrap();
+        let emb = (freqs.clone(), freqs).concat_along(Axis::<1>);
         let emb_sin = emb.clone().sin();
         let emb_cos = emb.cos();
-        (emb_sin.to_dtype::<E>(), emb_cos.to_dtype::<E>())
+        (
+            emb_sin.to_dtype::<E>().realize().unwrap(),
+            emb_cos.to_dtype::<E>().realize().unwrap(),
+        )
     }
 
     fn rotate_half<Batch: Dim, Seq: Dim, D: Device<E>>(
@@ -88,10 +88,7 @@ impl RotaryEmbedding {
     ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D> {
         let x1 = x.clone().slice((.., .., .., ..HEAD_DIM_OVER_2));
         let x2 = x.clone().slice((.., .., .., HEAD_DIM_OVER_2..));
-        let x1 = x1.permute::<_, Axes4<3, 0, 1, 2>>();
-        let x2 = x2.permute::<_, Axes4<3, 0, 1, 2>>();
-        let y = x1.concat(x2).permute::<_, Axes4<1, 2, 3, 0>>();
-        y.realize().unwrap()
+        (-x2, x1).concat_along(Axis::<3>).realize().unwrap()
     }
 }
 
