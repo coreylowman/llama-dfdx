@@ -3,7 +3,7 @@ use dfdx::{
     tensor::{CopySlice, Cpu, Tensor, TensorFromVec, ZerosTensor},
 };
 
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 
 #[derive(Debug)]
 pub enum LazyTensor<S: Shape, E: Unit> {
@@ -66,9 +66,17 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
             }
             Self::CPU(tensor) => {
                 if TypeId::of::<D>() == TypeId::of::<Cpu>() {
-                    // let t: Tensor<S, E, Cpu> = tensor.clone();
-                    // unsafe { std::mem::transmute(t) }
-                    todo!()
+                    // Here since we know `D` is of type `Cpu`, we can just clone the tensor.
+                    // However we can't easily return `tensor.clone()` because of the generic
+                    // type.
+                    //
+                    // One idea might be to use std::mem::transmute, however that gives us
+                    // an error about depedendly sized types for some reason.
+                    //
+                    // Instead we can go through Box<Any> and downcast it, which basically
+                    // goes through pointers to do this.
+                    let t: Box<dyn Any> = Box::new(tensor.clone());
+                    *t.downcast().unwrap()
                 } else {
                     let mut loaded = device.zeros_like(tensor.shape());
                     let buf = tensor.as_vec();
@@ -78,8 +86,16 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
             }
             #[cfg(feature = "cuda")]
             Self::CUDA(tensor) => {
-                // TODO if `D` is Cuda, we can just clone this
-                todo!()
+                if TypeId::of::<D>() == TypeId::of::<Cpu>() {
+                    // See comment in corresponding Self::CPU branch.
+                    let t: Box<dyn Any> = Box::new(tensor.clone());
+                    *t.downcast().unwrap()
+                } else {
+                    let mut loaded = device.zeros_like(tensor.shape());
+                    let buf = tensor.as_vec();
+                    loaded.copy_from(&buf);
+                    loaded
+                }
             }
         }
     }
