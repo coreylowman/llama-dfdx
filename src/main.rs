@@ -89,7 +89,7 @@ fn main() {
         SentencePieceBpeTokenizer::from_file(args.model + "/tokenizer.model", false).unwrap();
 
     const BOS_TOKEN: usize = 0;
-    const EOS_TOKEN: usize = 0;
+    const EOS_TOKEN: usize = 1;
 
     loop {
         let prompt = get_prompt_from_cli();
@@ -125,7 +125,7 @@ fn main() {
             }
         }
 
-        let tokens_i64: Vec<i64> = tokens.iter().map(|&x| x as i64).collect();
-        println!("{:?}", tokenizer.decode(&tokens_i64, true, true));
+        let tokens_i64: Vec<i64> = tokens.iter().skip(1).map(|&x| x as i64).collect();
+        println!("{:?}", tokenizer.decode(&tokens_i64, false, false));
     }
 }

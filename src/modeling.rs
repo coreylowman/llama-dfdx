@@ -23,11 +23,11 @@ impl RMSNorm {
         &self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
-        let x_f32 = x.clone().to_dtype::<f32>();
+        let x_f32 = x.to_dtype::<f32>();
         let variance = x_f32.clone().square().mean::<_, Axis<2>>();
         let inv_std = (variance + self.variance_epsilon as f32).sqrt().recip();
-        let x = inv_std.broadcast_like(&x) * x_f32;
-        self.weight.get_on(x.device()).broadcast_like(&x) * x.to_dtype::<E>()
+        let x_f32 = inv_std.broadcast_like(&x_f32) * x_f32;
+        self.weight.get_on(x_f32.device()).broadcast_like(&x_f32) * x_f32.to_dtype::<E>()
     }
 }
 
@@ -121,7 +121,7 @@ impl Attention {
 
         let (q, k) = self.rotary_embed.forward(q, k);
 
-        let inv_head_scale = (HEAD_DIM as f32).sqrt().recip();
+        let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
         let attn_weights = q.matmul(k.permute::<_, Axes4<0, 1, 3, 2>>()) * inv_head_scale;
         let attn_weights = attn_weights
             .to_dtype::<f32>()
@@ -159,7 +159,7 @@ impl MLP {
             let gate_proj = self.gate_proj.get_on(x.device());
             x.matmul(gate_proj.permute())
         };
-        let silu = up * gate.clone() * gate.sigmoid();
+        let silu = up * (gate.clone() * gate.sigmoid());
         let down_proj = self.down_proj.get_on(silu.device());
         silu.matmul(down_proj.permute())
     }
