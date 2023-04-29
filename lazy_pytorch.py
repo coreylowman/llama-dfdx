@@ -1,11 +1,20 @@
 import torch
+from transformers import LlamaTokenizer
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer, LlamaConfig, LlamaRMSNorm
 
-cfg = LlamaConfig()
+cfg = LlamaConfig(bos_token_id=0, eos_token_id=1)
+print(cfg)
 
 device = torch.device("cuda")
 
-token_list = [0, 17166, 263, 4700, 508, 367, 2309, 297, 29871, 29896, 29900, 2560, 6576, 29901, 29871]
+temperature = 0.0
+top_p = 0.95
+
+tokenizer = LlamaTokenizer.from_pretrained("decapoda-research/llama-7b-hf")
+
+inputs = tokenizer("The capital of Canada is", return_tensors="pt", add_special_tokens=True)
+token_list = list(map(int, inputs.input_ids[0]))
+print(token_list)
 
 while True:
     tokens = torch.tensor(token_list, device=device).unsqueeze(0)
@@ -42,6 +51,17 @@ while True:
     del sd_ends
 
     vocab = x[:, -1, :]
-    new_token = vocab.argmax(-1)
+    if temperature > 0:
+        probs = (vocab / temperature).softmax(-1)
+        probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
+        probs_sum = torch.cumsum(probs_sort, dim=-1)
+        mask = (probs_sum - probs_sort) > top_p
+        probs_sort[mask] = 0.0
+        probs_sort.div_(probs_sort.sum(dim=-1, keepdim=True))
+        new_token = torch.multinomial(probs_sort, num_samples=1)
+        new_token = torch.gather(probs_idx, -1, new_token)
+    else:
+        new_token = vocab.argmax(-1)
     print(new_token)
     token_list.append(new_token.item())
+    print(tokenizer.batch_decode([token_list[1:]]))
