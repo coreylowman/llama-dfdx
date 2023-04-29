@@ -17,12 +17,14 @@ pub enum LazyTensor<S: Shape, E: Unit> {
 }
 
 impl<S: Shape, E: Unit> LazyTensor<S, E> {
+    #[allow(unused)]
     pub fn load_into_cpu(&mut self, device: &Cpu) {
         let tensor = self.load_on(device);
         *self = Self::CPU(tensor);
     }
 
     #[cfg(feature = "cuda")]
+    #[allow(unused)]
     pub fn load_into_cuda(&mut self, device: &dfdx::tensor::Cuda) {
         let tensor = self.load_on(device);
         *self = Self::CUDA(tensor);
