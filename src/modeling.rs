@@ -24,10 +24,10 @@ impl RMSNorm {
         x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
         let x_f32 = x.clone().to_dtype::<f32>();
-        let variance = x_f32.square().mean::<(Batch, Seq), _>();
+        let variance = x_f32.clone().square().mean::<_, Axis<2>>();
         let inv_std = (variance + self.variance_epsilon as f32).sqrt().recip();
-        let x = inv_std.to_dtype::<E>().broadcast_like(&x) * x;
-        self.weight.get_on(x.device()).broadcast_like(&x) * x
+        let x = inv_std.broadcast_like(&x) * x_f32;
+        self.weight.get_on(x.device()).broadcast_like(&x) * x.to_dtype::<E>()
     }
 }
 
@@ -213,7 +213,7 @@ impl Llama {
 #[derive(Debug)]
 pub struct LlamaForCausalLM {
     pub llama: Llama,
-    pub lm_head: LazyTensor<Rank2<HIDDEN, VOCAB>, E>,
+    pub lm_head: LazyTensor<Rank2<VOCAB, HIDDEN>, E>,
 }
 
 impl LlamaForCausalLM {
@@ -223,6 +223,6 @@ impl LlamaForCausalLM {
     ) -> Tensor<(Batch, Seq, Const<VOCAB>), E, D> {
         let hidden_states = self.llama.forward(input_ids);
         let lm_head = self.lm_head.get_on(hidden_states.device());
-        hidden_states.matmul(lm_head)
+        hidden_states.matmul(lm_head.permute())
     }
 }
