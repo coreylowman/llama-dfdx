@@ -10,7 +10,7 @@ pub const NUM_LAYERS: usize = 32;
 const HEAD_DIM: usize = HIDDEN / NUM_HEADS;
 const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
 
-type E = half::f16;
+pub type E = half::f16;
 
 #[derive(Debug)]
 pub struct RMSNorm {
@@ -27,7 +27,7 @@ impl RMSNorm {
         let variance = x_f32.square().mean::<(Batch, Seq), _>();
         let inv_std = (variance + self.variance_epsilon as f32).sqrt().recip();
         let x = inv_std.to_dtype::<E>().broadcast_like(&x) * x;
-        self.weight.load_on(x.device()).broadcast_like(&x) * x
+        self.weight.get_on(x.device()).broadcast_like(&x) * x
     }
 }
 
@@ -61,7 +61,7 @@ impl RotaryEmbedding {
         Tensor<(Seq, Const<HEAD_DIM>), E, D>,
         Tensor<(Seq, Const<HEAD_DIM>), E, D>,
     ) {
-        let inv_freq = self.inv_freq.load_on(device);
+        let inv_freq = self.inv_freq.get_on(device);
         let t = device.arange(seq);
         let freqs = t.matmul(inv_freq);
         let freqs = freqs.realize::<(usize, usize)>().unwrap();
@@ -102,19 +102,19 @@ impl Attention {
         type Tr12 = Axes4<0, 2, 1, 3>;
 
         let q = {
-            let q_proj = self.q_proj.load_on(x.device());
+            let q_proj = self.q_proj.get_on(x.device());
             let q = x.clone().matmul(q_proj.permute());
             q.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
         };
 
         let k = {
-            let k_proj = self.k_proj.load_on(x.device());
+            let k_proj = self.k_proj.get_on(x.device());
             let k = x.clone().matmul(k_proj.permute());
             k.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
         };
 
         let v = {
-            let v_proj = self.v_proj.load_on(x.device());
+            let v_proj = self.v_proj.get_on(x.device());
             let v = x.matmul(v_proj.permute());
             v.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
         };
@@ -134,7 +134,7 @@ impl Attention {
             .reshape_like(&(batch, seq, Const::<HIDDEN>))
             .unwrap();
 
-        let out_proj = self.out_proj.load_on(attn_output.device());
+        let out_proj = self.out_proj.get_on(attn_output.device());
         attn_output.matmul(out_proj.permute())
     }
 }
@@ -152,15 +152,15 @@ impl MLP {
         x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
         let up = {
-            let up_proj = self.up_proj.load_on(x.device());
+            let up_proj = self.up_proj.get_on(x.device());
             x.clone().matmul(up_proj.permute())
         };
         let gate = {
-            let gate_proj = self.gate_proj.load_on(x.device());
+            let gate_proj = self.gate_proj.get_on(x.device());
             x.matmul(gate_proj.permute())
         };
         let silu = up * gate.clone() * gate.sigmoid();
-        let down_proj = self.down_proj.load_on(silu.device());
+        let down_proj = self.down_proj.get_on(silu.device());
         silu.matmul(down_proj.permute())
     }
 }
@@ -200,7 +200,7 @@ impl Llama {
         input_ids: Tensor<(Batch, Seq), usize, D>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
         let mut hidden_states = {
-            let embed_tokens = self.embed_tokens.load_on(input_ids.device());
+            let embed_tokens = self.embed_tokens.get_on(input_ids.device());
             embed_tokens.gather(input_ids)
         };
         for layer in self.layers.iter() {
@@ -222,7 +222,7 @@ impl LlamaForCausalLM {
         input_ids: Tensor<(Batch, Seq), usize, D>,
     ) -> Tensor<(Batch, Seq, Const<VOCAB>), E, D> {
         let hidden_states = self.llama.forward(input_ids);
-        let lm_head = self.lm_head.load_on(hidden_states.device());
+        let lm_head = self.lm_head.get_on(hidden_states.device());
         hidden_states.matmul(lm_head)
     }
 }

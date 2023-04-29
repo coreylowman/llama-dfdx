@@ -10,10 +10,10 @@ use clap::Parser;
 use dfdx::{shapes::Const, tensor::*, tensor_ops::*};
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
-/// Simple program to greet a person
+/// Run text generation with the LLaMa 7b model
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-struct Args {
+struct LlamaArgs {
     /// Root directory of the **converted** model. Use `convert.py` to convert the PyTorch `.bin` to
     /// the correct format.
     #[arg(short, long)]
@@ -22,6 +22,28 @@ struct Args {
     /// Number of new tokens to generate for each prompt.
     #[arg(short, long, default_value_t = 30)]
     generate: usize,
+
+    /// Maximum number of **bytes** available in RAM to store model
+    /// weights.
+    ///
+    /// This can be used in combination with --model-cuda-ram; You
+    /// can have model weights loaded in both cpu and cuda.
+    ///
+    /// Default of 0 means **no** model weights will be loaded
+    /// into RAM.
+    #[arg(long, default_value_t = 0)]
+    model_cpu_ram: usize,
+
+    /// Maximum number of **bytes** available in CUDA memory
+    /// to store model weights.
+    ///
+    /// This can be used in combination with --model-cpu-ram; You
+    /// can have model weights loaded in both cpu and cuda.
+    ///
+    /// Default of 0 means **no** model weights will be loaded
+    /// into CUDA.
+    #[arg(long, default_value_t = 0)]
+    model_cuda_ram: usize,
 }
 
 fn get_prompt_from_cli() -> String {
@@ -33,10 +55,36 @@ fn get_prompt_from_cli() -> String {
 }
 
 fn main() {
-    let args = Args::parse();
+    let args = LlamaArgs::parse();
 
     let dev: AutoDevice = Default::default();
-    let llama = load_on_disk(args.model.clone());
+
+    let mut llama = load_on_disk(args.model.clone());
+
+    #[cfg(feature = "cuda")]
+    {
+        let cpu: Cpu = Default::default();
+        let cuda_bytes_remaining = llama.maybe_load_on(args.model_cuda_ram, &dev);
+        let cpu_bytes_remaining = llama.maybe_load_on(args.model_cpu_ram, &cpu);
+        println!(
+            "Used {} bytes of CUDA ram ({cuda_bytes_remaining} remaining)",
+            args.model_cuda_ram - cuda_bytes_remaining
+        );
+        println!(
+            "Used {} bytes of CPU ram ({cpu_bytes_remaining} remaining)",
+            args.model_cpu_ram - cpu_bytes_remaining
+        );
+    }
+
+    #[cfg(not(feature = "cuda"))]
+    {
+        let cpu_bytes_remaining = llama.maybe_load_on(args.model_cpu_ram, &dev);
+        println!(
+            "Used {} bytes of CPU ram ({cpu_bytes_remaining} remaining)",
+            args.model_cpu_ram - cpu_bytes_remaining
+        );
+    }
+
     let tokenizer =
         SentencePieceBpeTokenizer::from_file(args.model + "/tokenizer.model", false).unwrap();
 
@@ -79,6 +127,6 @@ fn main() {
         }
 
         let tokens_i64: Vec<i64> = tokens.iter().map(|&x| x as i64).collect();
-        println!("{:?}", tokenizer.decode(&tokens_i64, false, true));
+        println!("{:?}", tokenizer.decode(&tokens_i64, true, true));
     }
 }

@@ -17,21 +17,38 @@ pub enum LazyTensor<S: Shape, E: Unit> {
 }
 
 impl<S: Shape, E: Unit> LazyTensor<S, E> {
-    #[allow(unused)]
-    pub fn load_into_cpu(&mut self, device: &Cpu) {
-        let tensor = self.load_on(device);
-        *self = Self::CPU(tensor);
-    }
+    pub fn load_on<D: ZerosTensor<E> + TensorFromVec<E> + CopySlice<E>>(&mut self, device: &D) {
+        if TypeId::of::<D>() == TypeId::of::<Cpu>() {
+            let tensor: Box<dyn Any> = Box::new(self.get_on(device));
+            *self = Self::CPU(*tensor.downcast().unwrap());
+        } else {
+            #[cfg(feature = "cuda")]
+            if TypeId::of::<D>() == TypeId::of::<dfdx::tensor::Cuda>() {
+                let tensor: Box<dyn Any> = Box::new(self.get_on(device));
+                *self = Self::CUDA(*tensor.downcast().unwrap());
+            } else {
+                panic!("Unsupported device found (not Cpu/Cuda");
+            }
 
-    #[cfg(feature = "cuda")]
-    #[allow(unused)]
-    pub fn load_into_cuda(&mut self, device: &dfdx::tensor::Cuda) {
-        let tensor = self.load_on(device);
-        *self = Self::CUDA(tensor);
+            #[cfg(not(feature = "cuda"))]
+            panic!("Unsupported device found (not Cpu/Cuda");
+        }
     }
 }
 
 impl<S: Shape, E: Unit> LazyTensor<S, E> {
+    pub fn num_bytes(&self) -> usize {
+        self.shape().num_elements() * std::mem::size_of::<E>()
+    }
+
+    pub fn is_on_disk(&self) -> bool {
+        if let Self::Disk { path: _, shape: _ } = self {
+            true
+        } else {
+            false
+        }
+    }
+
     fn shape(&self) -> S {
         match self {
             Self::Disk { path: _, shape } => *shape,
@@ -41,7 +58,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
         }
     }
 
-    pub fn load_on<D: ZerosTensor<E> + TensorFromVec<E> + CopySlice<E>>(
+    pub fn get_on<D: ZerosTensor<E> + TensorFromVec<E> + CopySlice<E>>(
         &self,
         device: &D,
     ) -> Tensor<S, E, D> {
