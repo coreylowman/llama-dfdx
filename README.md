@@ -29,5 +29,5 @@ cargo build --release
 ## Run the executable
 
 ```bash
-./target/release/llama-dfdx --model llama-7b-hf
+./target/release/llama-dfdx
 ```

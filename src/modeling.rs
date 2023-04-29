@@ -122,7 +122,7 @@ impl Attention {
         let (q, k) = self.rotary_embed.forward(q, k);
 
         let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
-        let attn_weights = q.matmul(k.permute::<_, Axes4<0, 1, 3, 2>>()) * inv_head_scale;
+        let attn_weights = q.matmul(k.permute()) * inv_head_scale;
         let attn_weights = attn_weights
             .to_dtype::<f32>()
             .softmax::<Axis<3>>()
@@ -180,10 +180,12 @@ impl DecoderLayer {
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
         let residual = x.clone();
         let x = self.input_layer_norm.forward(x);
-        let x = residual + self.self_attn.forward(x);
+        let x = self.self_attn.forward(x);
+        let x = residual + x;
         let residual = x.clone();
         let x = self.post_attention_layer_norm.forward(x);
-        residual + self.mlp.forward(x)
+        let x = self.mlp.forward(x);
+        x + residual
     }
 }
 

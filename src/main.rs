@@ -16,11 +16,11 @@ use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, Truncatio
 struct LlamaArgs {
     /// Root directory of the **converted** model. Use `convert.py` to convert the PyTorch `.bin` to
     /// the correct format.
-    #[arg(short, long)]
+    #[arg(short, long, default_value = "llama-7b-hf")]
     model: String,
 
     /// Number of new tokens to generate for each prompt.
-    #[arg(short, long, default_value_t = 30)]
+    #[arg(short, long, default_value_t = 10)]
     generate: usize,
 
     /// Maximum number of **bytes** available in RAM to store model
@@ -93,6 +93,7 @@ fn main() {
 
     loop {
         let prompt = get_prompt_from_cli();
+        let prompt = prompt.trim_end();
         let tokenized_input =
             tokenizer.encode_list(&[prompt], 128, &TruncationStrategy::LongestFirst, 0);
 
