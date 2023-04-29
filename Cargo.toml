@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 half = { git = "https://github.com/starkat99/half-rs.git", branch = "main", features = ["num-traits", "rand_distr"] }
-dfdx = { path = "../dfdx", default-features = false, features = ["std", "f16"] }
+dfdx = { git = "https://github.com/coreylowman/dfdx.git", branch = "main", default-features = false, features = ["std", "f16"] }
 memmap2 = "0.5.10"
 clap = { version = "4.2.5", features = ["derive"] }
 rust_tokenizers = "8.1.0"
