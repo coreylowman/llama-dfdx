@@ -10,6 +10,7 @@ half = { git = "https://github.com/starkat99/half-rs.git", branch = "main", feat
 dfdx = { path = "../dfdx", default-features = false, features = ["std", "f16"] }
 memmap2 = "0.5.10"
 clap = { version = "4.2.5", features = ["derive"] }
+rust_tokenizers = "8.1.0"
 
 [features]
 default = []

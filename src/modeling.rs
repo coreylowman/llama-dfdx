@@ -2,7 +2,7 @@ use super::lazy::LazyTensor;
 
 use dfdx::{data::Arange, shapes::*, tensor::Tensor, tensor_ops::*};
 
-const VOCAB: usize = 32_000;
+pub const VOCAB: usize = 32_000;
 const HIDDEN: usize = 4096;
 const INTERMEDIATE: usize = 11008;
 const NUM_HEADS: usize = 32;
