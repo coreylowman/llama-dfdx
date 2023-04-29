@@ -95,7 +95,6 @@ fn main() {
         let prompt = get_prompt_from_cli();
         let tokenized_input =
             tokenizer.encode_list(&[prompt], 128, &TruncationStrategy::LongestFirst, 0);
-        println!("Tokenized: {:?}", tokenized_input);
 
         let mut tokens: Vec<usize> = tokenized_input[0]
             .token_ids
@@ -104,13 +103,13 @@ fn main() {
             .collect();
 
         // BOS token, since SentencePieceBpeTokenizer doesn't add it
-        tokens.push(BOS_TOKEN);
+        tokens.insert(0, BOS_TOKEN);
 
         for _ in 0..args.generate {
             let start = Instant::now();
             let n_tokens = tokens.len();
             let input_ids = dev.tensor_from_vec(tokens.clone(), (Const::<1>, n_tokens));
-            let logits = llama.forward(input_ids.to_dtype::<usize>());
+            let logits = llama.forward(input_ids);
             let vocab = logits.select(dev.tensor([n_tokens - 1]));
             let logits = vocab.as_vec();
             let new_token = logits
