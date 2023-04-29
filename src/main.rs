@@ -64,24 +64,24 @@ fn main() {
     #[cfg(feature = "cuda")]
     {
         let cpu: Cpu = Default::default();
-        let cuda_bytes_remaining = llama.maybe_load_on(args.model_cuda_ram, &dev);
-        let cpu_bytes_remaining = llama.maybe_load_on(args.model_cpu_ram, &cpu);
+        let unused_bytes = llama.maybe_load_on(args.model_cuda_ram, &dev);
         println!(
-            "Used {} bytes of CUDA ram ({cuda_bytes_remaining} remaining)",
-            args.model_cuda_ram - cuda_bytes_remaining
+            "Used {} bytes of CUDA ram",
+            args.model_cuda_ram - unused_bytes
         );
+        let unused_bytes = llama.maybe_load_on(args.model_cpu_ram, &cpu);
         println!(
-            "Used {} bytes of CPU ram ({cpu_bytes_remaining} remaining)",
-            args.model_cpu_ram - cpu_bytes_remaining
+            "Used {} bytes of CPU ram",
+            args.model_cpu_ram - unused_bytes
         );
     }
 
     #[cfg(not(feature = "cuda"))]
     {
-        let cpu_bytes_remaining = llama.maybe_load_on(args.model_cpu_ram, &dev);
+        let unused_bytes = llama.maybe_load_on(args.model_cpu_ram, &dev);
         println!(
-            "Used {} bytes of CPU ram ({cpu_bytes_remaining} remaining)",
-            args.model_cpu_ram - cpu_bytes_remaining
+            "Used {} bytes of CPU ram",
+            args.model_cpu_ram - unused_bytes
         );
     }
 
