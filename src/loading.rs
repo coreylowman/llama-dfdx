@@ -60,6 +60,10 @@ pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
 }
 
 impl super::modeling::RMSNorm {
+    pub fn num_bytes(&self) -> usize {
+        self.weight.num_bytes()
+    }
+
     pub fn maybe_load_on<D: Device<super::modeling::E>>(
         &mut self,
         mut max_bytes: usize,
@@ -74,6 +78,10 @@ impl super::modeling::RMSNorm {
 }
 
 impl super::modeling::RotaryEmbedding {
+    pub fn num_bytes(&self) -> usize {
+        self.inv_freq.num_bytes()
+    }
+
     pub fn maybe_load_on<D: Device<f32>>(&mut self, mut max_bytes: usize, device: &D) -> usize {
         if max_bytes >= self.inv_freq.num_bytes() && self.inv_freq.is_on_disk() {
             self.inv_freq.load_on(device);
@@ -84,6 +92,14 @@ impl super::modeling::RotaryEmbedding {
 }
 
 impl super::modeling::Attention {
+    pub fn num_bytes(&self) -> usize {
+        self.q_proj.num_bytes()
+            + self.k_proj.num_bytes()
+            + self.v_proj.num_bytes()
+            + self.out_proj.num_bytes()
+            + self.rotary_embed.num_bytes()
+    }
+
     pub fn maybe_load_on<D: Device<super::modeling::E> + Device<f32>>(
         &mut self,
         mut max_bytes: usize,
@@ -110,6 +126,10 @@ impl super::modeling::Attention {
 }
 
 impl super::modeling::MLP {
+    pub fn num_bytes(&self) -> usize {
+        self.gate_proj.num_bytes() + self.down_proj.num_bytes() + self.up_proj.num_bytes()
+    }
+
     pub fn maybe_load_on<D: Device<super::modeling::E>>(
         &mut self,
         mut max_bytes: usize,
@@ -132,6 +152,13 @@ impl super::modeling::MLP {
 }
 
 impl super::modeling::DecoderLayer {
+    pub fn num_bytes(&self) -> usize {
+        self.self_attn.num_bytes()
+            + self.mlp.num_bytes()
+            + self.input_layer_norm.num_bytes()
+            + self.post_attention_layer_norm.num_bytes()
+    }
+
     pub fn maybe_load_on<D: Device<super::modeling::E> + Device<f32>>(
         &mut self,
         mut max_bytes: usize,
@@ -148,6 +175,12 @@ impl super::modeling::DecoderLayer {
 }
 
 impl super::modeling::Llama {
+    pub fn num_bytes(&self) -> usize {
+        self.embed_tokens.num_bytes()
+            + self.layers.iter().map(|l| l.num_bytes()).sum::<usize>()
+            + self.norm.num_bytes()
+    }
+
     pub fn maybe_load_on<D: Device<super::modeling::E> + Device<f32>>(
         &mut self,
         mut max_bytes: usize,
@@ -165,6 +198,10 @@ impl super::modeling::Llama {
 }
 
 impl super::modeling::LlamaForCausalLM {
+    pub fn num_bytes(&self) -> usize {
+        self.llama.num_bytes() + self.lm_head.num_bytes()
+    }
+
     pub fn maybe_load_on<D: Device<super::modeling::E> + Device<f32>>(
         &mut self,
         mut max_bytes: usize,
