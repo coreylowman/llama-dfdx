@@ -64,13 +64,13 @@ impl RotaryEmbedding {
         let inv_freq = self.inv_freq.get_on(device);
         let t = device.arange(seq);
         let freqs = t.matmul(inv_freq);
-        let freqs = freqs.realize::<(usize, usize)>().unwrap();
+        let freqs = freqs.realize::<(usize, usize)>();
         let emb = (freqs.clone(), freqs).concat_along(Axis::<1>);
         let emb_sin = emb.clone().sin();
         let emb_cos = emb.cos();
         (
-            emb_sin.to_dtype::<E>().realize().unwrap(),
-            emb_cos.to_dtype::<E>().realize().unwrap(),
+            emb_sin.to_dtype::<E>().realize(),
+            emb_cos.to_dtype::<E>().realize(),
         )
     }
 
@@ -79,7 +79,7 @@ impl RotaryEmbedding {
     ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D> {
         let x1 = x.clone().slice((.., .., .., ..HEAD_DIM_OVER_2));
         let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..));
-        (-x2, x1).concat_along(Axis::<3>).realize().unwrap()
+        (-x2, x1).concat_along(Axis::<3>).realize()
     }
 }
 
