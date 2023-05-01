@@ -105,7 +105,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
             }
             #[cfg(feature = "cuda")]
             Self::CUDA(tensor) => {
-                if TypeId::of::<D>() == TypeId::of::<Cpu>() {
+                if TypeId::of::<D>() == TypeId::of::<dfdx::tensor::Cuda>() {
                     // See comment in corresponding Self::CPU branch.
                     let t: Box<dyn Any> = Box::new(tensor.clone());
                     *t.downcast().unwrap()

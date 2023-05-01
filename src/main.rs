@@ -7,7 +7,11 @@ use std::{io::Write, time::Instant};
 use self::loading::load_on_disk;
 
 use clap::Parser;
-use dfdx::{shapes::Const, tensor::*, tensor_ops::*};
+use dfdx::{
+    shapes::{Const, HasShape},
+    tensor::*,
+    tensor_ops::*,
+};
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
 /// Run text generation with the LLaMa 7b model
@@ -44,6 +48,11 @@ struct LlamaArgs {
     /// into CUDA.
     #[arg(long, default_value_t = 0)]
     model_cuda_ram: usize,
+
+    /// Disable the KV cache. This will slow computations down,
+    /// but reduce memory usage.
+    #[arg(long, default_value_t = false)]
+    disable_cache: bool,
 }
 
 fn get_prompt_from_cli() -> String {
@@ -106,12 +115,20 @@ fn main() {
         // BOS token, since SentencePieceBpeTokenizer doesn't add it
         tokens.insert(0, BOS_TOKEN);
 
+        let mut cache: Option<Vec<modeling::Cache<Const<1>, usize>>> = None;
+
         for _ in 0..args.generate {
             let start = Instant::now();
             let n_tokens = tokens.len();
-            let input_ids = dev.tensor_from_vec(tokens.clone(), (Const::<1>, n_tokens));
-            let logits = llama.forward(input_ids);
-            let vocab = logits.select(dev.tensor([n_tokens - 1]));
+            let input_ids = match cache.as_ref() {
+                None => dev.tensor_from_vec(tokens.clone(), (Const::<1>, n_tokens)),
+                Some(_) => dev.tensor([[*tokens.last().unwrap()]]).realize(),
+            };
+            let seq_len = input_ids.shape().1;
+            let out = llama.forward(input_ids, cache);
+            let logits = out.0;
+            cache = (!args.disable_cache).then(|| out.1);
+            let vocab = logits.select(dev.tensor([seq_len - 1]));
             let logits = vocab.as_vec();
             let new_token = logits
                 .iter()
