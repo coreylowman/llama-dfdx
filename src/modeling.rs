@@ -1,6 +1,11 @@
 use super::lazy::LazyTensor;
 
-use dfdx::{data::Arange, shapes::*, tensor::Tensor, tensor_ops::*};
+use dfdx::{
+    data::Arange,
+    shapes::*,
+    tensor::{AutoDevice, Tensor},
+    tensor_ops::*,
+};
 
 pub const VOCAB: usize = 32_000;
 const HIDDEN: usize = 4096;
@@ -10,6 +15,7 @@ pub const NUM_LAYERS: usize = 32;
 const HEAD_DIM: usize = HIDDEN / NUM_HEADS;
 const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
 
+pub type Dev = AutoDevice;
 pub type E = half::f16;
 
 #[derive(Debug)]
@@ -19,10 +25,10 @@ pub struct RMSNorm {
 }
 
 impl RMSNorm {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev> {
         let x_f32 = x.to_dtype::<f32>();
         let variance = x_f32.clone().square().mean::<_, Axis<2>>();
         let inv_std = (variance + self.variance_epsilon as f32).sqrt().recip();
@@ -37,13 +43,13 @@ pub struct RotaryEmbedding {
 }
 
 impl RotaryEmbedding {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        q: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
-        k: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
+        q: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+        k: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
     ) -> (
-        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
-        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
+        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
     ) {
         let (sin, cos) = self.get_sincos(q.device(), q.shape().2);
         let sin = sin.broadcast_like(&q);
@@ -53,18 +59,18 @@ impl RotaryEmbedding {
         (q_embed, k_embed)
     }
 
-    fn get_sincos<Seq: Dim, D: Device<f32> + Device<E> + Arange<f32>>(
+    fn get_sincos<Seq: Dim>(
         &self,
-        device: &D,
+        device: &Dev,
         seq: Seq,
     ) -> (
-        Tensor<(Seq, Const<HEAD_DIM>), E, D>,
-        Tensor<(Seq, Const<HEAD_DIM>), E, D>,
+        Tensor<(Seq, Const<HEAD_DIM>), E, Dev>,
+        Tensor<(Seq, Const<HEAD_DIM>), E, Dev>,
     ) {
         let inv_freq = self.inv_freq.get_on(device);
         let t = device.arange(seq);
         let freqs = t.matmul(inv_freq);
-        let freqs = freqs.realize::<(usize, usize)>();
+        let freqs = freqs.realize::<(Seq, usize)>();
         let emb = (freqs.clone(), freqs).concat_along(Axis::<1>);
         let emb_sin = emb.clone().sin();
         let emb_cos = emb.cos();
@@ -74,9 +80,9 @@ impl RotaryEmbedding {
         )
     }
 
-    fn rotate_half<Batch: Dim, Seq: Dim, D: Device<E>>(
-        x: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
-    ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D> {
+    fn rotate_half<Batch: Dim, Seq: Dim>(
+        x: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+    ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev> {
         let x1 = x.clone().slice((.., .., .., ..HEAD_DIM_OVER_2));
         let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..));
         (-x2, x1).concat_along(Axis::<3>).realize()
@@ -93,10 +99,10 @@ pub struct Attention {
 }
 
 impl Attention {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev> {
         let (batch, seq, _) = *x.shape();
         let bsnh = (batch, seq, Const::<NUM_HEADS>, Const::<HEAD_DIM>);
         type Tr12 = Axes4<0, 2, 1, 3>;
@@ -147,10 +153,10 @@ pub struct MLP {
 }
 
 impl MLP {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E>>(
+    fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev> {
         let up = {
             let up_proj = self.up_proj.get_on(x.device());
             x.clone().matmul(up_proj.permute())
@@ -174,10 +180,10 @@ pub struct DecoderLayer {
 }
 
 impl DecoderLayer {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev> {
         let residual = x.clone();
         let x = self.input_layer_norm.forward(x);
         let x = self.self_attn.forward(x);
@@ -197,10 +203,10 @@ pub struct Llama {
 }
 
 impl Llama {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        input_ids: Tensor<(Batch, Seq), usize, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        input_ids: Tensor<(Batch, Seq), usize, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev> {
         let mut hidden_states = {
             let embed_tokens = self.embed_tokens.get_on(input_ids.device());
             embed_tokens.gather(input_ids)
@@ -219,10 +225,10 @@ pub struct LlamaForCausalLM {
 }
 
 impl LlamaForCausalLM {
-    pub fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
+    pub fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        input_ids: Tensor<(Batch, Seq), usize, D>,
-    ) -> Tensor<(Batch, Seq, Const<VOCAB>), E, D> {
+        input_ids: Tensor<(Batch, Seq), usize, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<VOCAB>), E, Dev> {
         let hidden_states = self.llama.forward(input_ids);
         let lm_head = self.lm_head.get_on(hidden_states.device());
         hidden_states.matmul(lm_head.permute())
