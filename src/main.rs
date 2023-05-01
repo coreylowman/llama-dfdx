@@ -27,29 +27,29 @@ struct LlamaArgs {
 
     /// Number of new tokens to generate for each prompt.
     #[arg(short, long, default_value_t = 10)]
-    generate: usize,
+    num_tokens: usize,
 
-    /// Maximum number of **megabytes** available in RAM to store model
-    /// weights.
+    /// Maximum number of **megabytes** available in RAM to store
+    /// *model* weights.
     ///
-    /// This can be used in combination with --model-cuda-ram; You
+    /// This can be used in combination with --cuda-mb-for-model; You
     /// can have model weights loaded in both cpu and cuda.
     ///
     /// Value of 0 means **no** model weights will be loaded
     /// into RAM.
     #[arg(long, default_value_t = 0)]
-    model_cpu_mb: usize,
+    cpu_mb_for_model: usize,
 
-    /// Maximum number of **megabytes** available in CUDA memory
-    /// to store model weights.
+    /// Maximum number of **megabytes** available in CUDA RAM
+    /// to store *model* weights.
     ///
-    /// This can be used in combination with --model-cpu-ram; You
+    /// This can be used in combination with --cpu-mb-for-model; You
     /// can have model weights loaded in both cpu and cuda.
     ///
     /// Value of 0 means **no** model weights will be loaded
     /// into CUDA.
     #[arg(long, default_value_t = 13476)]
-    model_cuda_mb: usize,
+    cuda_mb_for_model: usize,
 
     /// Disable the KV cache. This will slow computations down,
     /// but reduce memory usage.
@@ -73,17 +73,16 @@ fn main() {
     let mut llama = load_on_disk(args.model.clone());
     println!("Model size: {} MB", llama.num_bytes() / MB);
 
-    let cpu_bytes = args.model_cpu_mb * MB;
-
     #[cfg(feature = "cuda")]
     {
-        let cuda_bytes = args.model_cuda_mb * MB;
+        let cuda_bytes = args.cuda_mb_for_model * MB;
         println!("Loading model weights into CUDA...");
         let unused_bytes = llama.maybe_load_on(cuda_bytes, &dev);
         println!("Used {} MB of CUDA ram", (cuda_bytes - unused_bytes) / MB);
     }
 
     {
+        let cpu_bytes = args.cpu_mb_for_model * MB;
         println!("Loading model weights into CPU...");
         let cpu: Cpu = Default::default();
         let unused_bytes = llama.maybe_load_on(cpu_bytes, &cpu);
@@ -115,7 +114,7 @@ fn main() {
 
         let mut output: String = prompt.into();
 
-        for i_token in 0..args.generate {
+        for i_token in 0..args.num_tokens {
             let n_tokens = tokens.len();
             let input_ids = match cache.as_ref() {
                 None => dev.tensor_from_vec(tokens.clone(), (Const::<1>, n_tokens)),
