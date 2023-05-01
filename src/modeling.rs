@@ -3,7 +3,7 @@ use super::lazy::LazyTensor;
 use dfdx::{
     data::Arange,
     shapes::*,
-    tensor::{AsArray, AutoDevice, Tensor, TriangleTensor, ZerosTensor},
+    tensor::{AutoDevice, Tensor, TriangleTensor, ZerosTensor},
     tensor_ops::*,
 };
 
