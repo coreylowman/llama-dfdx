@@ -13,6 +13,12 @@ const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
 pub type E = half::f16;
 
 #[derive(Debug)]
+pub struct Cache<Batch: Dim, D: Device<E>> {
+    key: Tensor<(Batch, Const<NUM_HEADS>, usize, Const<HEAD_DIM>), E, D>,
+    val: Tensor<(Batch, Const<NUM_HEADS>, usize, Const<HEAD_DIM>), E, D>,
+}
+
+#[derive(Debug)]
 pub struct RMSNorm {
     pub weight: LazyTensor<(Const<HIDDEN>,), E>,
     pub variance_epsilon: f64,
@@ -96,9 +102,10 @@ impl Attention {
     fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
         &self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        cache: Option<Cache<Batch, D>>,
+    ) -> (Tensor<(Batch, Seq, Const<HIDDEN>), E, D>, Cache<Batch, D>) {
         let (batch, seq, _) = *x.shape();
-        let bsnh = (batch, seq, Const::<NUM_HEADS>, Const::<HEAD_DIM>);
+        let bsnh = (batch, seq.size(), Const::<NUM_HEADS>, Const::<HEAD_DIM>);
         type Tr12 = Axes4<0, 2, 1, 3>;
 
         let q = {
@@ -113,13 +120,23 @@ impl Attention {
             k.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
         };
 
-        let v = {
+        let mut v = {
             let v_proj = self.v_proj.get_on(x.device());
             let v = x.matmul(v_proj.permute());
             v.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
         };
 
-        let (q, k) = self.rotary_embed.forward(q, k);
+        let (q, mut k) = self.rotary_embed.forward(q, k);
+
+        if let Some(cache) = cache {
+            k = (cache.key, k).concat_along(Axis::<2>);
+            v = (cache.val, v).concat_along(Axis::<2>);
+        }
+
+        let cache = Cache {
+            key: k.clone(),
+            val: v.clone(),
+        };
 
         let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
         let attn_weights = q.matmul(k.permute()) * inv_head_scale;
@@ -135,7 +152,7 @@ impl Attention {
             .unwrap();
 
         let out_proj = self.out_proj.get_on(attn_output.device());
-        attn_output.matmul(out_proj.permute())
+        (attn_output.matmul(out_proj.permute()), cache)
     }
 }
 
@@ -177,15 +194,16 @@ impl DecoderLayer {
     fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
         &self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        cache: Option<Cache<Batch, D>>,
+    ) -> (Tensor<(Batch, Seq, Const<HIDDEN>), E, D>, Cache<Batch, D>) {
         let residual = x.clone();
         let x = self.input_layer_norm.forward(x);
-        let x = self.self_attn.forward(x);
+        let (x, cache) = self.self_attn.forward(x, cache);
         let x = residual + x;
         let residual = x.clone();
         let x = self.post_attention_layer_norm.forward(x);
         let x = self.mlp.forward(x);
-        x + residual
+        (x + residual, cache)
     }
 }
 
@@ -200,15 +218,34 @@ impl Llama {
     fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
         &self,
         input_ids: Tensor<(Batch, Seq), usize, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        cache: Option<Vec<Cache<Batch, D>>>,
+    ) -> (
+        Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
+        Vec<Cache<Batch, D>>,
+    ) {
         let mut hidden_states = {
             let embed_tokens = self.embed_tokens.get_on(input_ids.device());
             embed_tokens.gather(input_ids)
         };
-        for layer in self.layers.iter() {
-            hidden_states = layer.forward(hidden_states);
+        let mut caches = Vec::with_capacity(self.layers.len());
+        match cache {
+            Some(cache) => {
+                assert_eq!(cache.len(), self.layers.len());
+                for (layer, cache_i) in self.layers.iter().zip(cache.into_iter()) {
+                    let out = layer.forward(hidden_states, Some(cache_i));
+                    hidden_states = out.0;
+                    caches.push(out.1);
+                }
+            }
+            None => {
+                for layer in self.layers.iter() {
+                    let out = layer.forward(hidden_states, None);
+                    hidden_states = out.0;
+                    caches.push(out.1);
+                }
+            }
         }
-        self.norm.forward(hidden_states)
+        (self.norm.forward(hidden_states), caches)
     }
 }
 
@@ -222,9 +259,13 @@ impl LlamaForCausalLM {
     pub fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
         &self,
         input_ids: Tensor<(Batch, Seq), usize, D>,
-    ) -> Tensor<(Batch, Seq, Const<VOCAB>), E, D> {
-        let hidden_states = self.llama.forward(input_ids);
+        cache: Option<Vec<Cache<Batch, D>>>,
+    ) -> (
+        Tensor<(Batch, Seq, Const<VOCAB>), E, D>,
+        Vec<Cache<Batch, D>>,
+    ) {
+        let (hidden_states, cache) = self.llama.forward(input_ids, cache);
         let lm_head = self.lm_head.get_on(hidden_states.device());
-        hidden_states.matmul(lm_head.permute())
+        (hidden_states.matmul(lm_head.permute()), cache)
     }
 }

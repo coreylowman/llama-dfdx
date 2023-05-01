@@ -106,11 +106,15 @@ fn main() {
         // BOS token, since SentencePieceBpeTokenizer doesn't add it
         tokens.insert(0, BOS_TOKEN);
 
+        let mut cache = None;
+
         for _ in 0..args.generate {
             let start = Instant::now();
             let n_tokens = tokens.len();
             let input_ids = dev.tensor_from_vec(tokens.clone(), (Const::<1>, n_tokens));
-            let logits = llama.forward(input_ids);
+            let out = llama.forward(input_ids, cache);
+            let logits = out.0;
+            cache = Some(out.1);
             let vocab = logits.select(dev.tensor([n_tokens - 1]));
             let logits = vocab.as_vec();
             let new_token = logits
