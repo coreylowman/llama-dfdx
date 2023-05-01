@@ -110,7 +110,7 @@ fn main() {
         // BOS token, since SentencePieceBpeTokenizer doesn't add it
         tokens.insert(0, BOS_TOKEN);
 
-        let mut cache: Option<Vec<modeling::Cache<Const<1>, usize, _>>> = None;
+        let mut cache: Option<Vec<modeling::Cache<Const<1>, usize>>> = None;
 
         for _ in 0..args.generate {
             let start = Instant::now();

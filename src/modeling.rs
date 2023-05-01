@@ -19,9 +19,9 @@ pub type Dev = AutoDevice;
 pub type E = half::f16;
 
 #[derive(Debug)]
-pub struct Cache<Batch: Dim, Seq: Dim, D: Device<E>> {
-    key: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
-    val: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
+pub struct Cache<Batch: Dim, Seq: Dim> {
+    key: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+    val: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
 }
 
 #[derive(Debug)]
@@ -111,10 +111,10 @@ impl Attention {
         &self,
         x: Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
         attn_mask: Tensor<(CurSeq, TotSeq), E, Dev>,
-        cache: Option<Cache<Batch, PastSeq, Dev>>,
+        cache: Option<Cache<Batch, PastSeq>>,
     ) -> (
         Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
-        Cache<Batch, TotSeq, Dev>,
+        Cache<Batch, TotSeq>,
     ) {
         let (batch, cur_seq, _) = *x.shape();
         let past_seq = cache
@@ -220,10 +220,10 @@ impl DecoderLayer {
         &self,
         x: Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
         attn_mask: Tensor<(CurSeq, TotSeq), E, Dev>,
-        cache: Option<Cache<Batch, PastSeq, Dev>>,
+        cache: Option<Cache<Batch, PastSeq>>,
     ) -> (
         Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
-        Cache<Batch, TotSeq, Dev>,
+        Cache<Batch, TotSeq>,
     ) {
         let residual = x.clone();
         let x = self.input_layer_norm.forward(x);
@@ -247,10 +247,10 @@ impl Llama {
     fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &self,
         input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
-        cache: Option<Vec<Cache<Batch, PastSeq, Dev>>>,
+        cache: Option<Vec<Cache<Batch, PastSeq>>>,
     ) -> (
         Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
-        Vec<Cache<Batch, TotSeq, Dev>>,
+        Vec<Cache<Batch, TotSeq>>,
     ) {
         let cur_seq = input_ids.shape().1;
         let past_seq = cache
@@ -314,10 +314,10 @@ impl LlamaForCausalLM {
     pub fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &self,
         input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
-        cache: Option<Vec<Cache<Batch, PastSeq, Dev>>>,
+        cache: Option<Vec<Cache<Batch, PastSeq>>>,
     ) -> (
         Tensor<(Batch, CurSeq, Const<VOCAB>), E, Dev>,
-        Vec<Cache<Batch, TotSeq, Dev>>,
+        Vec<Cache<Batch, TotSeq>>,
     ) {
         let (hidden_states, cache) = self.llama.forward(input_ids, cache);
         let lm_head = self.lm_head.get_on(hidden_states.device());
