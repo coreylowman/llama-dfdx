@@ -61,7 +61,7 @@ fn get_prompt_from_cli() -> String {
 fn main() {
     let args = LlamaArgs::parse();
 
-    let dev: AutoDevice = Default::default();
+    let dev: modeling::Dev = Default::default();
 
     let mut llama = load_on_disk(args.model.clone());
 

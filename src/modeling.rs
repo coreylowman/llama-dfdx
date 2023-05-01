@@ -1,6 +1,11 @@
 use super::lazy::LazyTensor;
 
-use dfdx::{data::Arange, shapes::*, tensor::Tensor, tensor_ops::*};
+use dfdx::{
+    data::Arange,
+    shapes::*,
+    tensor::{AutoDevice, Tensor, TriangleTensor, ZerosTensor},
+    tensor_ops::*,
+};
 
 pub const VOCAB: usize = 32_000;
 const HIDDEN: usize = 4096;
@@ -10,6 +15,7 @@ pub const NUM_LAYERS: usize = 32;
 const HEAD_DIM: usize = HIDDEN / NUM_HEADS;
 const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
 
+pub type Dev = AutoDevice;
 pub type E = half::f16;
 
 #[derive(Debug)]
@@ -25,10 +31,10 @@ pub struct RMSNorm {
 }
 
 impl RMSNorm {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev> {
         let x_f32 = x.to_dtype::<f32>();
         let variance = x_f32.clone().square().mean::<_, Axis<2>>();
         let inv_std = (variance + self.variance_epsilon as f32).sqrt().recip();
@@ -43,14 +49,14 @@ pub struct RotaryEmbedding {
 }
 
 impl RotaryEmbedding {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        q: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
-        k: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
+        q: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+        k: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
         offset: usize,
     ) -> (
-        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
-        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
+        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
     ) {
         let (sin, cos) = self.get_sincos(q.device(), offset, q.shape().2);
         let sin = sin.broadcast_like(&q);
@@ -60,19 +66,19 @@ impl RotaryEmbedding {
         (q_embed, k_embed)
     }
 
-    fn get_sincos<Seq: Dim, D: Device<f32> + Device<E> + Arange<f32>>(
+    fn get_sincos<Seq: Dim>(
         &self,
-        device: &D,
+        device: &Dev,
         offset: usize,
         seq: Seq,
     ) -> (
-        Tensor<(Seq, Const<HEAD_DIM>), E, D>,
-        Tensor<(Seq, Const<HEAD_DIM>), E, D>,
+        Tensor<(Seq, Const<HEAD_DIM>), E, Dev>,
+        Tensor<(Seq, Const<HEAD_DIM>), E, Dev>,
     ) {
         let inv_freq = self.inv_freq.get_on(device);
         let t = device.arange(seq) + offset as f32;
         let freqs = t.matmul(inv_freq);
-        let freqs = freqs.realize::<(usize, usize)>();
+        let freqs = freqs.realize::<(Seq, usize)>();
         let emb = (freqs.clone(), freqs).concat_along(Axis::<1>);
         let emb_sin = emb.clone().sin();
         let emb_cos = emb.cos();
@@ -82,9 +88,9 @@ impl RotaryEmbedding {
         )
     }
 
-    fn rotate_half<Batch: Dim, Seq: Dim, D: Device<E>>(
-        x: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
-    ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D> {
+    fn rotate_half<Batch: Dim, Seq: Dim>(
+        x: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+    ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev> {
         let x1 = x.clone().slice((.., .., .., ..HEAD_DIM_OVER_2));
         let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..));
         (-x2, x1).concat_along(Axis::<3>).realize()
@@ -101,14 +107,14 @@ pub struct Attention {
 }
 
 impl Attention {
-    fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &self,
-        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), E, D>,
-        attn_mask: Tensor<(CurSeq, TotSeq), E, D>,
-        cache: Option<Cache<Batch, PastSeq, D>>,
+        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
+        attn_mask: Tensor<(CurSeq, TotSeq), E, Dev>,
+        cache: Option<Cache<Batch, PastSeq, Dev>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<HIDDEN>), E, D>,
-        Cache<Batch, TotSeq, D>,
+        Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
+        Cache<Batch, TotSeq, Dev>,
     ) {
         let (batch, cur_seq, _) = *x.shape();
         let past_seq = cache
@@ -183,10 +189,10 @@ pub struct MLP {
 }
 
 impl MLP {
-    fn forward<Batch: Dim, Seq: Dim, D: Device<E>>(
+    fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, D>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, D> {
+        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev> {
         let up = {
             let up_proj = self.up_proj.get_on(x.device());
             x.clone().matmul(up_proj.permute())
@@ -210,14 +216,14 @@ pub struct DecoderLayer {
 }
 
 impl DecoderLayer {
-    fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &self,
-        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), E, D>,
-        attn_mask: Tensor<(CurSeq, TotSeq), E, D>,
-        cache: Option<Cache<Batch, PastSeq, D>>,
+        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
+        attn_mask: Tensor<(CurSeq, TotSeq), E, Dev>,
+        cache: Option<Cache<Batch, PastSeq, Dev>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<HIDDEN>), E, D>,
-        Cache<Batch, TotSeq, D>,
+        Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
+        Cache<Batch, TotSeq, Dev>,
     ) {
         let residual = x.clone();
         let x = self.input_layer_norm.forward(x);
@@ -238,13 +244,13 @@ pub struct Llama {
 }
 
 impl Llama {
-    fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim, D: Device<E> + Device<f32>>(
+    fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &self,
-        input_ids: Tensor<(Batch, CurSeq), usize, D>,
-        cache: Option<Vec<Cache<Batch, PastSeq, D>>>,
+        input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
+        cache: Option<Vec<Cache<Batch, PastSeq, Dev>>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<HIDDEN>), E, D>,
-        Vec<Cache<Batch, TotSeq, D>>,
+        Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
+        Vec<Cache<Batch, TotSeq, Dev>>,
     ) {
         let cur_seq = input_ids.shape().1;
         let past_seq = cache
@@ -284,7 +290,7 @@ impl Llama {
             }
             None => {
                 for layer in self.layers.iter() {
-                    let out = layer.forward::<Batch, CurSeq, usize, TotSeq, _>(
+                    let out = layer.forward::<Batch, CurSeq, usize, TotSeq>(
                         hidden_states,
                         attn_mask.clone(),
                         None,
@@ -305,19 +311,13 @@ pub struct LlamaForCausalLM {
 }
 
 impl LlamaForCausalLM {
-    pub fn forward<
-        Batch: Dim,
-        CurSeq: Dim,
-        PastSeq: Dim,
-        TotSeq: Dim,
-        D: Device<E> + Device<f32>,
-    >(
+    pub fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &self,
-        input_ids: Tensor<(Batch, CurSeq), usize, D>,
-        cache: Option<Vec<Cache<Batch, PastSeq, D>>>,
+        input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
+        cache: Option<Vec<Cache<Batch, PastSeq, Dev>>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<VOCAB>), E, D>,
-        Vec<Cache<Batch, TotSeq, D>>,
+        Tensor<(Batch, CurSeq, Const<VOCAB>), E, Dev>,
+        Vec<Cache<Batch, TotSeq, Dev>>,
     ) {
         let (hidden_states, cache) = self.llama.forward(input_ids, cache);
         let lm_head = self.lm_head.get_on(hidden_states.device());
