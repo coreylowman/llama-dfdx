@@ -7,7 +7,11 @@ use std::{io::Write, time::Instant};
 use self::loading::load_on_disk;
 
 use clap::Parser;
-use dfdx::{shapes::Const, tensor::*, tensor_ops::*};
+use dfdx::{
+    shapes::{Const, HasShape},
+    tensor::*,
+    tensor_ops::*,
+};
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
 /// Run text generation with the LLaMa 7b model
@@ -111,11 +115,15 @@ fn main() {
         for _ in 0..args.generate {
             let start = Instant::now();
             let n_tokens = tokens.len();
-            let input_ids = dev.tensor_from_vec(tokens.clone(), (Const::<1>, n_tokens));
+            let input_ids = match cache.as_ref() {
+                None => dev.tensor_from_vec(tokens.clone(), (Const::<1>, n_tokens)),
+                Some(_) => dev.tensor([[*tokens.last().unwrap()]]).realize().unwrap(),
+            };
+            let seq_len = input_ids.shape().1;
             let out = llama.forward(input_ids, cache);
             let logits = out.0;
             cache = Some(out.1);
-            let vocab = logits.select(dev.tensor([n_tokens - 1]));
+            let vocab = logits.select(dev.tensor([seq_len - 1]));
             let logits = vocab.as_vec();
             let new_token = logits
                 .iter()

@@ -47,11 +47,12 @@ impl RotaryEmbedding {
         &self,
         q: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
         k: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
+        offset: usize,
     ) -> (
         Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
         Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, D>,
     ) {
-        let (sin, cos) = self.get_sincos(q.device(), q.shape().2);
+        let (sin, cos) = self.get_sincos(q.device(), offset, q.shape().2);
         let sin = sin.broadcast_like(&q);
         let cos = cos.broadcast_like(&q);
         let q_embed = (q.clone() * cos.clone()) + (Self::rotate_half(q) * sin.clone());
@@ -62,13 +63,14 @@ impl RotaryEmbedding {
     fn get_sincos<Seq: Dim, D: Device<f32> + Device<E> + Arange<f32>>(
         &self,
         device: &D,
+        offset: usize,
         seq: Seq,
     ) -> (
         Tensor<(Seq, Const<HEAD_DIM>), E, D>,
         Tensor<(Seq, Const<HEAD_DIM>), E, D>,
     ) {
         let inv_freq = self.inv_freq.get_on(device);
-        let t = device.arange(seq);
+        let t = device.arange(seq) + offset as f32;
         let freqs = t.matmul(inv_freq);
         let freqs = freqs.realize::<(usize, usize)>().unwrap();
         let emb = (freqs.clone(), freqs).concat_along(Axis::<1>);
@@ -105,6 +107,9 @@ impl Attention {
         cache: Option<Cache<Batch, D>>,
     ) -> (Tensor<(Batch, Seq, Const<HIDDEN>), E, D>, Cache<Batch, D>) {
         let (batch, seq, _) = *x.shape();
+        if cache.is_some() {
+            assert_eq!(seq.size(), 1);
+        }
         let bsnh = (batch, seq.size(), Const::<NUM_HEADS>, Const::<HEAD_DIM>);
         type Tr12 = Axes4<0, 2, 1, 3>;
 
@@ -126,7 +131,14 @@ impl Attention {
             v.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
         };
 
-        let (q, mut k) = self.rotary_embed.forward(q, k);
+        let (q, mut k) = self.rotary_embed.forward(
+            q,
+            k,
+            cache
+                .as_ref()
+                .map(|c| c.key.shape().2 + 1)
+                .unwrap_or_default(),
+        );
 
         if let Some(cache) = cache {
             k = (cache.key, k).concat_along(Axis::<2>);
@@ -227,25 +239,25 @@ impl Llama {
             let embed_tokens = self.embed_tokens.get_on(input_ids.device());
             embed_tokens.gather(input_ids)
         };
-        let mut caches = Vec::with_capacity(self.layers.len());
+        let mut new_caches = Vec::with_capacity(self.layers.len());
         match cache {
             Some(cache) => {
                 assert_eq!(cache.len(), self.layers.len());
                 for (layer, cache_i) in self.layers.iter().zip(cache.into_iter()) {
                     let out = layer.forward(hidden_states, Some(cache_i));
                     hidden_states = out.0;
-                    caches.push(out.1);
+                    new_caches.push(out.1);
                 }
             }
             None => {
                 for layer in self.layers.iter() {
                     let out = layer.forward(hidden_states, None);
                     hidden_states = out.0;
-                    caches.push(out.1);
+                    new_caches.push(out.1);
                 }
             }
         }
-        (self.norm.forward(hidden_states), caches)
+        (self.norm.forward(hidden_states), new_caches)
     }
 }
 
