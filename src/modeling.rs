@@ -3,7 +3,7 @@ use super::lazy::LazyTensor;
 use dfdx::{
     data::Arange,
     shapes::*,
-    tensor::{AutoDevice, Tensor, TriangleTensor, ZerosTensor},
+    tensor::{AsArray, AutoDevice, Tensor, TriangleTensor, ZerosTensor},
     tensor_ops::*,
 };
 
@@ -271,7 +271,7 @@ impl Llama {
             } else {
                 (causal_mask, dev.zeros_like(&(cur_seq, past_seq))).concat_along(Axis::<1>)
             };
-            attn_mask = attn_mask + causal_mask.realize();
+            attn_mask = causal_mask.realize();
         }
 
         let mut hidden_states = {

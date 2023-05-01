@@ -48,6 +48,11 @@ struct LlamaArgs {
     /// into CUDA.
     #[arg(long, default_value_t = 0)]
     model_cuda_ram: usize,
+
+    /// Disable the KV cache. This will slow computations down,
+    /// but reduce memory usage.
+    #[arg(long, default_value_t = false)]
+    disable_cache: bool,
 }
 
 fn get_prompt_from_cli() -> String {
@@ -122,7 +127,7 @@ fn main() {
             let seq_len = input_ids.shape().1;
             let out = llama.forward(input_ids, cache);
             let logits = out.0;
-            cache = Some(out.1);
+            cache = (!args.disable_cache).then(|| out.1);
             let vocab = logits.select(dev.tensor([seq_len - 1]));
             let logits = vocab.as_vec();
             let new_token = logits
