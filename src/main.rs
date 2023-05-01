@@ -110,14 +110,14 @@ fn main() {
         // BOS token, since SentencePieceBpeTokenizer doesn't add it
         tokens.insert(0, BOS_TOKEN);
 
-        let mut cache = None;
+        let mut cache: Option<Vec<modeling::Cache<Const<1>, usize, _>>> = None;
 
         for _ in 0..args.generate {
             let start = Instant::now();
             let n_tokens = tokens.len();
             let input_ids = match cache.as_ref() {
                 None => dev.tensor_from_vec(tokens.clone(), (Const::<1>, n_tokens)),
-                Some(_) => dev.tensor([[*tokens.last().unwrap()]]).realize().unwrap(),
+                Some(_) => dev.tensor([[*tokens.last().unwrap()]]).realize(),
             };
             let seq_len = input_ids.shape().1;
             let out = llama.forward(input_ids, cache);
