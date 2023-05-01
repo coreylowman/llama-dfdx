@@ -134,10 +134,7 @@ impl Attention {
         let (q, mut k) = self.rotary_embed.forward(
             q,
             k,
-            cache
-                .as_ref()
-                .map(|c| c.key.shape().2 + 1)
-                .unwrap_or_default(),
+            cache.as_ref().map(|c| c.key.shape().2).unwrap_or_default(),
         );
 
         if let Some(cache) = cache {

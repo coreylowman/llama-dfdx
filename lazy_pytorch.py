@@ -16,9 +16,20 @@ inputs = tokenizer("The capital of Canada is", return_tensors="pt", add_special_
 token_list = list(map(int, inputs.input_ids[0]))
 print(token_list)
 
+cache = None
+
 while True:
-    tokens = torch.tensor(token_list, device=device).unsqueeze(0)
-    position_ids = torch.arange(len(token_list), device=device).unsqueeze(0)
+    if cache is None:
+        tokens = torch.tensor(token_list, device=device).unsqueeze(0)
+        position_ids = torch.arange(len(token_list), device=device).unsqueeze(0)
+        # attn_mask = torch.ones(1, 1, len(token_list), len(token_list), device=device)
+    else:
+        tokens = torch.tensor([token_list[-1]], device=device).unsqueeze(0)
+        position_ids = torch.tensor([len(token_list) - 1], device=device).unsqueeze(0)
+        # attn_mask = torch.ones(1, 1, 1, len(token_list), device=device)
+
+    print(tokens)
+    print(position_ids)
 
     # embedding
     sd_ends = torch.load("./llama-7b-hf/pytorch_model-00033-of-00033.bin")
@@ -29,12 +40,16 @@ while True:
     del embed
 
     # decoder layers
+    new_cache = []
     decoder = LlamaDecoderLayer(cfg).to(device=device)
     for i in range(32):
         sd = torch.load(f"./llama-7b-hf/pytorch_model-{i + 1:05}-of-00033.bin")
         decoder.load_state_dict({k.replace(f"model.layers.{i}.", ""): v for k, v in sd.items()})
         del sd
-        x = decoder(x, position_ids=position_ids)[0]
+        out = decoder(x, position_ids=position_ids, past_key_value=None if cache is None else cache[i], use_cache=True)
+        x = out[0]
+        new_cache.append(out[1])
+    cache = new_cache
 
     sd_ends = torch.load("./llama-7b-hf/pytorch_model-00033-of-00033.bin")
 
