@@ -8,38 +8,38 @@ use dfdx::{
 };
 
 pub const VOCAB: usize = 32_000;
-const HIDDEN: usize = 4096;
-const INTERMEDIATE: usize = 11008;
-const NUM_HEADS: usize = 32;
+pub const HIDDEN: usize = 4096;
+pub const INTERMEDIATE: usize = 11008;
+pub const NUM_HEADS: usize = 32;
 pub const NUM_LAYERS: usize = 32;
-const HEAD_DIM: usize = HIDDEN / NUM_HEADS;
-const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
+pub const HEAD_DIM: usize = HIDDEN / NUM_HEADS;
+pub const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
 
+pub use half::f16;
 pub type Dev = AutoDevice;
-pub type E = half::f16;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Cache<Batch: Dim, Seq: Dim> {
-    key: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
-    val: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+    pub key: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
+    pub val: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
 }
 
 #[derive(Debug)]
 pub struct RMSNorm {
-    pub weight: LazyTensor<(Const<HIDDEN>,), E>,
+    pub weight: LazyTensor<(Const<HIDDEN>,), f16>,
     pub variance_epsilon: f64,
 }
 
 impl RMSNorm {
     fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev> {
+        x: Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev> {
         let x_f32 = x.to_dtype::<f32>();
-        let variance = x_f32.clone().square().mean::<_, Axis<2>>();
-        let inv_std = (variance + self.variance_epsilon as f32).sqrt().recip();
-        let x_f32 = inv_std.broadcast_like(&x_f32) * x_f32;
-        self.weight.get_on(x_f32.device()).broadcast_like(&x_f32) * x_f32.to_dtype::<E>()
+        let var_f32 = x_f32.clone().square().mean::<_, Axis<2>>();
+        let inv_std_f32 = (var_f32 + self.variance_epsilon as f32).sqrt().recip();
+        let x_f32 = inv_std_f32.broadcast_like(&x_f32) * x_f32;
+        self.weight.get_on(x_f32.device()).broadcast_like(&x_f32) * x_f32.to_dtype::<f16>()
     }
 }
 
@@ -51,12 +51,12 @@ pub struct RotaryEmbedding {
 impl RotaryEmbedding {
     fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        q: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
-        k: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+        q: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
+        k: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
         offset: usize,
     ) -> (
-        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
-        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
+        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
+        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
     ) {
         let (sin, cos) = self.get_sincos(q.device(), offset, q.shape().2);
         let sin = sin.broadcast_like(&q);
@@ -72,8 +72,8 @@ impl RotaryEmbedding {
         offset: usize,
         seq: Seq,
     ) -> (
-        Tensor<(Seq, Const<HEAD_DIM>), E, Dev>,
-        Tensor<(Seq, Const<HEAD_DIM>), E, Dev>,
+        Tensor<(Seq, Const<HEAD_DIM>), f16, Dev>,
+        Tensor<(Seq, Const<HEAD_DIM>), f16, Dev>,
     ) {
         let inv_freq = self.inv_freq.get_on(device);
         let t = device.arange(seq) + offset as f32;
@@ -83,14 +83,14 @@ impl RotaryEmbedding {
         let emb_sin = emb.clone().sin();
         let emb_cos = emb.cos();
         (
-            emb_sin.to_dtype::<E>().realize(),
-            emb_cos.to_dtype::<E>().realize(),
+            emb_sin.to_dtype::<f16>().realize(),
+            emb_cos.to_dtype::<f16>().realize(),
         )
     }
 
     fn rotate_half<Batch: Dim, Seq: Dim>(
-        x: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev>,
-    ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), E, Dev> {
+        x: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
+    ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev> {
         let x1 = x.clone().slice((.., .., .., ..HEAD_DIM_OVER_2));
         let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..));
         (-x2, x1).concat_along(Axis::<3>).realize()
@@ -99,21 +99,21 @@ impl RotaryEmbedding {
 
 #[derive(Debug)]
 pub struct Attention {
-    pub q_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
-    pub k_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
-    pub v_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
-    pub out_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, E>,
+    pub q_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, f16>,
+    pub k_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, f16>,
+    pub v_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, f16>,
+    pub o_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, f16>,
     pub rotary_embed: RotaryEmbedding,
 }
 
 impl Attention {
     fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &self,
-        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
-        attn_mask: Tensor<(CurSeq, TotSeq), E, Dev>,
+        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
+        attn_mask: Tensor<(CurSeq, TotSeq), f16, Dev>,
         cache: Option<Cache<Batch, PastSeq>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
+        Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
         Cache<Batch, TotSeq>,
     ) {
         let (batch, cur_seq, _) = *x.shape();
@@ -150,6 +150,7 @@ impl Attention {
         let q = q.realize::<(_, _, CurSeq, _)>();
 
         let (k, v) = if let Some(cache) = cache {
+            // for concat we need to make the dimension usize if we don't want to use nightly
             let k = (cache.key.realize::<(_, _, usize, _)>(), k).concat_along(Axis::<2>);
             let v = (cache.val.realize::<(_, _, usize, _)>(), v).concat_along(Axis::<2>);
             (k.realize(), v.realize())
@@ -157,49 +158,48 @@ impl Attention {
             (k.realize(), v.realize())
         };
 
+        // save the concat'd key and value for the next forward pass
+        // NOTE: k has already had RoPe applied
         let cache = Cache {
             key: k.clone(),
             val: v.clone(),
         };
 
         let inv_head_scale = (HEAD_DIM as f64).sqrt().recip() as f32;
-        let attn_weights = q.matmul(k.permute()) * inv_head_scale;
-        let attn_weights = attn_mask.broadcast_like(&attn_weights) + attn_weights;
-        let attn_weights = attn_weights
-            .to_dtype::<f32>()
-            .softmax::<Axis<3>>()
-            .to_dtype::<E>();
+        let w = q.matmul(k.permute()) * inv_head_scale;
+        let w = attn_mask.broadcast_like(&w) + w;
+        let w = w.to_dtype::<f32>().softmax::<Axis<3>>().to_dtype::<f16>();
 
-        let attn_output = attn_weights.matmul(v);
-        let attn_output = attn_output
+        let o = w.matmul(v);
+        let o = o
             .permute::<_, Tr12>()
             .reshape_like(&(batch, cur_seq, Const::<HIDDEN>))
             .unwrap();
 
-        let out_proj = self.out_proj.get_on(attn_output.device());
-        (attn_output.matmul(out_proj.permute()), cache)
+        let out_proj = self.o_proj.get_on(o.device());
+        (o.matmul(out_proj.permute()), cache)
     }
 }
 
 #[derive(Debug)]
 pub struct MLP {
-    pub gate_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, E>,
-    pub down_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, E>,
-    pub up_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, E>,
+    pub gate_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, f16>,
+    pub down_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, f16>,
+    pub up_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, f16>,
 }
 
 impl MLP {
     fn forward<Batch: Dim, Seq: Dim>(
         &self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), E, Dev> {
-        let up = {
-            let up_proj = self.up_proj.get_on(x.device());
-            x.clone().matmul(up_proj.permute())
-        };
+        x: Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev>,
+    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev> {
         let gate = {
             let gate_proj = self.gate_proj.get_on(x.device());
-            x.matmul(gate_proj.permute())
+            x.clone().matmul(gate_proj.permute())
+        };
+        let up = {
+            let up_proj = self.up_proj.get_on(x.device());
+            x.matmul(up_proj.permute())
         };
         let silu = up * (gate.clone() * gate.sigmoid());
         let down_proj = self.down_proj.get_on(silu.device());
@@ -218,11 +218,11 @@ pub struct DecoderLayer {
 impl DecoderLayer {
     fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &self,
-        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
-        attn_mask: Tensor<(CurSeq, TotSeq), E, Dev>,
+        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
+        attn_mask: Tensor<(CurSeq, TotSeq), f16, Dev>,
         cache: Option<Cache<Batch, PastSeq>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
+        Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
         Cache<Batch, TotSeq>,
     ) {
         let residual = x.clone();
@@ -238,7 +238,7 @@ impl DecoderLayer {
 
 #[derive(Debug)]
 pub struct Llama {
-    pub embed_tokens: LazyTensor<Rank2<VOCAB, HIDDEN>, E>,
+    pub embed_tokens: LazyTensor<Rank2<VOCAB, HIDDEN>, f16>,
     pub layers: Vec<DecoderLayer>,
     pub norm: RMSNorm,
 }
@@ -249,7 +249,7 @@ impl Llama {
         input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
         cache: Option<Vec<Cache<Batch, PastSeq>>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<HIDDEN>), E, Dev>,
+        Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
         Vec<Cache<Batch, TotSeq>>,
     ) {
         let cur_seq = input_ids.shape().1;
@@ -265,7 +265,7 @@ impl Llama {
             .realize::<(CurSeq, TotSeq)>();
 
         if cur_seq.size() > 1 {
-            let causal_mask = dev.upper_tri_like(&(cur_seq, cur_seq.size()), E::MIN, 1);
+            let causal_mask = dev.upper_tri_like(&(cur_seq, cur_seq.size()), f16::MIN, 1);
             let causal_mask = if past_seq == 0 {
                 causal_mask
             } else {
@@ -279,26 +279,14 @@ impl Llama {
             embed_tokens.gather(input_ids)
         };
         let mut new_caches = Vec::with_capacity(self.layers.len());
-        match cache {
-            Some(cache) => {
-                assert_eq!(cache.len(), self.layers.len());
-                for (layer, cache_i) in self.layers.iter().zip(cache.into_iter()) {
-                    let out = layer.forward(hidden_states, attn_mask.clone(), Some(cache_i));
-                    hidden_states = out.0;
-                    new_caches.push(out.1);
-                }
-            }
-            None => {
-                for layer in self.layers.iter() {
-                    let out = layer.forward::<Batch, CurSeq, usize, TotSeq>(
-                        hidden_states,
-                        attn_mask.clone(),
-                        None,
-                    );
-                    hidden_states = out.0;
-                    new_caches.push(out.1);
-                }
-            }
+        let cache = cache
+            .map(|cs| cs.into_iter().map(|c| Some(c)).collect())
+            .unwrap_or_else(|| vec![None; self.layers.len()]);
+        assert_eq!(cache.len(), self.layers.len());
+        for (layer_i, cache_i) in self.layers.iter().zip(cache.into_iter()) {
+            let out = layer_i.forward(hidden_states, attn_mask.clone(), cache_i);
+            hidden_states = out.0;
+            new_caches.push(out.1);
         }
         (self.norm.forward(hidden_states), new_caches)
     }
@@ -307,7 +295,7 @@ impl Llama {
 #[derive(Debug)]
 pub struct LlamaForCausalLM {
     pub llama: Llama,
-    pub lm_head: LazyTensor<Rank2<VOCAB, HIDDEN>, E>,
+    pub lm_head: LazyTensor<Rank2<VOCAB, HIDDEN>, f16>,
 }
 
 impl LlamaForCausalLM {
@@ -316,7 +304,7 @@ impl LlamaForCausalLM {
         input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
         cache: Option<Vec<Cache<Batch, PastSeq>>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<VOCAB>), E, Dev>,
+        Tensor<(Batch, CurSeq, Const<VOCAB>), f16, Dev>,
         Vec<Cache<Batch, TotSeq>>,
     ) {
         let (hidden_states, cache) = self.llama.forward(input_ids, cache);
