@@ -1,27 +1,21 @@
 mod lazy;
 mod loading;
 mod modeling;
+mod pipeline;
 mod sampling;
 
 use std::io::Write;
 
-use self::loading::load_on_disk;
-
-use clap::Parser;
-use dfdx::{
-    shapes::{Axis, Const, HasShape},
-    tensor::*,
-    tensor_ops::*,
-};
-use rand::{rngs::StdRng, SeedableRng};
-use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
-
-const MB: usize = 1_000_000;
+use clap::{Parser, Subcommand};
 
 /// Run text generation with the LLaMa 7b model
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-struct LlamaArgs {
+#[command(propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
     /// Seed for device & sampling RNG.
     #[arg(long, default_value_t = 0)]
     seed: u64,
@@ -45,8 +39,7 @@ struct LlamaArgs {
     #[arg(long, default_value_t = false)]
     disable_cache: bool,
 
-    /// Whether to do greedy sampling or top_p sampling with
-    /// top_p = `0.95`, and temperature = `0.8`.
+    /// Specify to do greedy sampling instead of top-p sampling.
     #[arg(long, default_value_t = false)]
     greedy: bool,
 
@@ -63,110 +56,92 @@ struct LlamaArgs {
     top_k: usize,
 }
 
-fn get_prompt_from_cli() -> String {
-    let mut user_input = String::new();
-    std::print!("Enter prompt > ");
-    std::io::stdout().flush().unwrap();
-    std::io::stdin().read_line(&mut user_input).unwrap();
-    user_input
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Chat back and forth interactively with the model using
+    /// stdio.
+    Chat,
+
+    /// Generates text with a prompt from the CLI.
+    Generate {
+        /// The text to begin generation from.
+        prompt: String,
+    },
+
+    /// Generates text with a prompt in a file.
+    File {
+        /// The path to the file containing prompts.
+        path: String,
+    },
 }
 
 fn main() {
-    let args = LlamaArgs::parse();
+    let args = Cli::parse();
 
-    let mut rng = StdRng::seed_from_u64(args.seed);
-    let dev: modeling::Dev = modeling::Dev::seed_from_u64(args.seed);
-
-    let mut llama = load_on_disk(args.model.clone());
-    let model_num_bytes = llama.num_bytes();
-    println!("Model size: {} MB", model_num_bytes / MB);
-
-    let max_bytes = args
-        .ram_limit_for_model
-        .map(|x| x * MB)
-        .unwrap_or(model_num_bytes);
-    let unused_bytes = llama.deferred_load(max_bytes);
-    println!(
-        "{} MB of model parameters will be held in RAM.",
-        (max_bytes - unused_bytes) / MB
+    let mut pipeline = pipeline::LlamaPipeline::new(
+        args.model,
+        args.ram_limit_for_model,
+        args.seed,
+        pipeline::LlamaConfig {
+            num_tokens: args.num_tokens,
+            disable_cache: args.disable_cache,
+            greedy: args.greedy,
+            top_p: args.top_p,
+            temperature: args.temperature,
+            top_k: args.top_k,
+        },
     );
 
-    let tokenizer =
-        SentencePieceBpeTokenizer::from_file(args.model + "/tokenizer.model", false).unwrap();
-
-    const BOS_TOKEN: usize = 1;
-    const EOS_TOKEN: usize = 2;
-    const NEWLINE_TOKEN: usize = 13;
-
-    loop {
-        let prompt = get_prompt_from_cli();
-        let prompt = prompt.trim_end();
-        let tokenized_input = tokenizer.encode_list(
-            &[prompt],
-            prompt.len(),
-            &TruncationStrategy::LongestFirst,
-            0,
-        );
-
-        let mut tokens: Vec<usize> = tokenized_input[0]
-            .token_ids
-            .iter()
-            .map(|&x| x as usize)
-            .collect();
-
-        // BOS token, since SentencePieceBpeTokenizer doesn't add it
-        tokens.insert(0, BOS_TOKEN);
-
-        let mut cache: Option<Vec<modeling::Cache<Const<1>, usize>>> = None;
-
-        let mut output: String = prompt.into();
-
-        let start = std::time::Instant::now();
-        let mut num_tokens_generated = 0;
-
-        for i_token in 0..args.num_tokens {
-            let n_tokens = tokens.len();
-            let input_ids = match cache.as_ref() {
-                None => dev.tensor_from_vec(tokens.clone(), (Const::<1>, n_tokens)),
-                Some(_) => dev.tensor([[*tokens.last().unwrap()]]).realize(),
-            };
-            let seq_len = input_ids.shape().1;
-            let out = llama.forward(input_ids, cache);
-            let logits = out.0;
-            cache = (!args.disable_cache).then(|| out.1);
-            let vocab = logits.select(dev.tensor([seq_len - 1]));
-            let new_token = if args.greedy {
-                sampling::greedy(vocab.to_dtype::<f32>().as_vec())
-            } else {
-                let probs = (vocab.to_dtype::<f32>() / args.temperature).softmax::<Axis<1>>();
-                sampling::top_p(probs.as_vec(), args.top_p, args.top_k, &mut rng)
-            };
-
-            tokens.push(new_token);
-            num_tokens_generated += 1;
-
-            if new_token == EOS_TOKEN {
-                break;
+    match args.command {
+        Commands::Generate { prompt } => {
+            print!("{prompt}");
+            for new_content in pipeline.generate(prompt) {
+                print!("{new_content}");
+                std::io::stdout().flush().unwrap();
             }
-
-            let new_content = if new_token == NEWLINE_TOKEN {
-                "\n".into()
-            } else {
-                tokenizer.decode(&[new_token as i64], true, false)
-            };
-            output.push_str(&new_content);
-            print!("{}", if i_token == 0 { &output } else { &new_content });
-            std::io::stdout().flush().unwrap();
+            println!();
         }
+        Commands::File { path } => {
+            let prompt = std::fs::read_to_string(path).unwrap();
+            print!("{prompt}");
+            for new_content in pipeline.generate(prompt) {
+                print!("{new_content}");
+                std::io::stdout().flush().unwrap();
+            }
+            println!();
+        }
+        Commands::Chat => {
+            let mut conversation = String::new();
+            loop {
+                let mut prompt = String::new();
+                std::print!("> ");
+                std::io::stdout().flush().unwrap();
+                std::io::stdin().read_line(&mut prompt).unwrap();
+                let prompt = prompt.trim_end();
 
-        let elapsed = start.elapsed();
-        let elapsed_s = elapsed.as_secs_f64();
-        let tokens_per_s = num_tokens_generated as f64 / elapsed_s;
-        let ms_per_token = 1000.0 * elapsed_s / num_tokens_generated as f64;
+                conversation.push_str(prompt);
 
-        println!(
-            "\nGenerated {} tokens in {:.3?} ({tokens_per_s:.3} tokens/s, {ms_per_token:.0} ms/token)",
-            num_tokens_generated, elapsed
-        );
+                let start = std::time::Instant::now();
+
+                let mut num_tokens_generated = 0;
+                for new_content in pipeline.generate(prompt) {
+                    print!("{}", &new_content);
+                    conversation.push_str(&new_content);
+                    std::io::stdout().flush().unwrap();
+                    num_tokens_generated += 1;
+                }
+                println!();
+
+                let elapsed = start.elapsed();
+                let elapsed_s = elapsed.as_secs_f64();
+                let tokens_per_s = num_tokens_generated as f64 / elapsed_s;
+                let ms_per_token = 1000.0 * elapsed_s / num_tokens_generated as f64;
+
+                println!(
+                    "\n*Generated {} tokens in {:.3?} ({tokens_per_s:.3} tokens/s, {ms_per_token:.0} ms/token)*",
+                    num_tokens_generated, elapsed
+                );
+            }
+        }
     }
 }

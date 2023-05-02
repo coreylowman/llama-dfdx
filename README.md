@@ -40,10 +40,12 @@ cargo build --release
 
 With default args:
 ```bash
-./target/release/llama-dfdx
+./target/release/llama-dfdx generate "<prompt>"
+./target/release/llama-dfdx chat
+./target/release/llama-dfdx file <path to prompt file>
 ```
 
-To see what custom args you can use:
+To see what commands/custom args you can use:
 ```bash
 ./target/release/llama-dfdx --help
 ```

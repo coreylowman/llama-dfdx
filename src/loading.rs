@@ -30,7 +30,7 @@ pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
                     inv_freq: disk_tensor!(layer_root, "self_attn", "rotary_emb", "inv_freq"),
                 },
             },
-            mlp: modeling::MLP {
+            mlp: modeling::Mlp {
                 gate_proj: disk_tensor!(layer_root, "mlp", "gate_proj", "weight"),
                 down_proj: disk_tensor!(layer_root, "mlp", "down_proj", "weight"),
                 up_proj: disk_tensor!(layer_root, "mlp", "up_proj", "weight"),
@@ -107,7 +107,7 @@ impl super::modeling::Attention {
     }
 }
 
-impl super::modeling::MLP {
+impl super::modeling::Mlp {
     pub fn num_bytes(&self) -> usize {
         self.gate_proj.num_bytes() + self.down_proj.num_bytes() + self.up_proj.num_bytes()
     }
