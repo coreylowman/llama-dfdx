@@ -1,5 +1,3 @@
-use dfdx::tensor_ops::Device;
-
 use super::lazy::LazyTensor;
 use super::modeling;
 use std::path::Path;
@@ -11,6 +9,7 @@ macro_rules! disk_tensor {
         LazyTensor::Disk {
             path,
             shape: Default::default(),
+            move_to_ram: false,
         }
     }};
 }
@@ -59,20 +58,22 @@ pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
     }
 }
 
+macro_rules! maybe_mark {
+    ($MaxBytes:tt, $Field:expr) => {
+        if $MaxBytes >= $Field.num_bytes() && $Field.is_on_disk() {
+            $Field.defer_load();
+            $MaxBytes -= $Field.num_bytes();
+        }
+    };
+}
+
 impl super::modeling::RMSNorm {
     pub fn num_bytes(&self) -> usize {
         self.weight.num_bytes()
     }
 
-    pub fn maybe_load_on<D: Device<super::modeling::f16>>(
-        &mut self,
-        mut max_bytes: usize,
-        device: &D,
-    ) -> usize {
-        if max_bytes >= self.weight.num_bytes() && self.weight.is_on_disk() {
-            self.weight.load_on(device);
-            max_bytes -= self.weight.num_bytes();
-        }
+    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
+        maybe_mark!(max_bytes, self.weight);
         max_bytes
     }
 }
@@ -82,11 +83,8 @@ impl super::modeling::RotaryEmbedding {
         self.inv_freq.num_bytes()
     }
 
-    pub fn maybe_load_on<D: Device<f32>>(&mut self, mut max_bytes: usize, device: &D) -> usize {
-        if max_bytes >= self.inv_freq.num_bytes() && self.inv_freq.is_on_disk() {
-            self.inv_freq.load_on(device);
-            max_bytes -= self.inv_freq.num_bytes();
-        }
+    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
+        maybe_mark!(max_bytes, self.inv_freq);
         max_bytes
     }
 }
@@ -100,28 +98,12 @@ impl super::modeling::Attention {
             + self.rotary_embed.num_bytes()
     }
 
-    pub fn maybe_load_on<D: Device<super::modeling::f16> + Device<f32>>(
-        &mut self,
-        mut max_bytes: usize,
-        device: &D,
-    ) -> usize {
-        if max_bytes >= self.q_proj.num_bytes() && self.q_proj.is_on_disk() {
-            self.q_proj.load_on(device);
-            max_bytes -= self.q_proj.num_bytes();
-        }
-        if max_bytes >= self.k_proj.num_bytes() && self.k_proj.is_on_disk() {
-            self.k_proj.load_on(device);
-            max_bytes -= self.k_proj.num_bytes();
-        }
-        if max_bytes >= self.v_proj.num_bytes() && self.v_proj.is_on_disk() {
-            self.v_proj.load_on(device);
-            max_bytes -= self.v_proj.num_bytes();
-        }
-        if max_bytes >= self.o_proj.num_bytes() && self.o_proj.is_on_disk() {
-            self.o_proj.load_on(device);
-            max_bytes -= self.o_proj.num_bytes();
-        }
-        self.rotary_embed.maybe_load_on(max_bytes, device)
+    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
+        maybe_mark!(max_bytes, self.q_proj);
+        maybe_mark!(max_bytes, self.k_proj);
+        maybe_mark!(max_bytes, self.v_proj);
+        maybe_mark!(max_bytes, self.o_proj);
+        self.rotary_embed.maybe_mark_for_ram(max_bytes)
     }
 }
 
@@ -130,23 +112,10 @@ impl super::modeling::MLP {
         self.gate_proj.num_bytes() + self.down_proj.num_bytes() + self.up_proj.num_bytes()
     }
 
-    pub fn maybe_load_on<D: Device<super::modeling::f16>>(
-        &mut self,
-        mut max_bytes: usize,
-        device: &D,
-    ) -> usize {
-        if max_bytes >= self.gate_proj.num_bytes() && self.gate_proj.is_on_disk() {
-            self.gate_proj.load_on(device);
-            max_bytes -= self.gate_proj.num_bytes();
-        }
-        if max_bytes >= self.down_proj.num_bytes() && self.down_proj.is_on_disk() {
-            self.down_proj.load_on(device);
-            max_bytes -= self.down_proj.num_bytes();
-        }
-        if max_bytes >= self.up_proj.num_bytes() && self.up_proj.is_on_disk() {
-            self.up_proj.load_on(device);
-            max_bytes -= self.up_proj.num_bytes();
-        }
+    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
+        maybe_mark!(max_bytes, self.gate_proj);
+        maybe_mark!(max_bytes, self.down_proj);
+        maybe_mark!(max_bytes, self.up_proj);
         max_bytes
     }
 }
@@ -159,17 +128,11 @@ impl super::modeling::DecoderLayer {
             + self.post_attention_layer_norm.num_bytes()
     }
 
-    pub fn maybe_load_on<D: Device<super::modeling::f16> + Device<f32>>(
-        &mut self,
-        mut max_bytes: usize,
-        device: &D,
-    ) -> usize {
-        max_bytes = self.self_attn.maybe_load_on(max_bytes, device);
-        max_bytes = self.mlp.maybe_load_on(max_bytes, device);
-        max_bytes = self.input_layer_norm.maybe_load_on(max_bytes, device);
-        max_bytes = self
-            .post_attention_layer_norm
-            .maybe_load_on(max_bytes, device);
+    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
+        max_bytes = self.self_attn.maybe_mark_for_ram(max_bytes);
+        max_bytes = self.mlp.maybe_mark_for_ram(max_bytes);
+        max_bytes = self.input_layer_norm.maybe_mark_for_ram(max_bytes);
+        max_bytes = self.post_attention_layer_norm.maybe_mark_for_ram(max_bytes);
         max_bytes
     }
 }
@@ -181,19 +144,12 @@ impl super::modeling::Llama {
             + self.norm.num_bytes()
     }
 
-    pub fn maybe_load_on<D: Device<super::modeling::f16> + Device<f32>>(
-        &mut self,
-        mut max_bytes: usize,
-        device: &D,
-    ) -> usize {
-        if max_bytes >= self.embed_tokens.num_bytes() && self.embed_tokens.is_on_disk() {
-            self.embed_tokens.load_on(device);
-            max_bytes -= self.embed_tokens.num_bytes();
-        }
+    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
+        maybe_mark!(max_bytes, self.embed_tokens);
         for layer in self.layers.iter_mut() {
-            max_bytes = layer.maybe_load_on(max_bytes, device);
+            max_bytes = layer.maybe_mark_for_ram(max_bytes);
         }
-        self.norm.maybe_load_on(max_bytes, device)
+        self.norm.maybe_mark_for_ram(max_bytes)
     }
 }
 
@@ -202,15 +158,8 @@ impl super::modeling::LlamaForCausalLM {
         self.llama.num_bytes() + self.lm_head.num_bytes()
     }
 
-    pub fn maybe_load_on<D: Device<super::modeling::f16> + Device<f32>>(
-        &mut self,
-        mut max_bytes: usize,
-        device: &D,
-    ) -> usize {
-        if max_bytes >= self.lm_head.num_bytes() && self.lm_head.is_on_disk() {
-            self.lm_head.load_on(device);
-            max_bytes -= self.lm_head.num_bytes();
-        }
-        self.llama.maybe_load_on(max_bytes, device)
+    pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
+        maybe_mark!(max_bytes, self.lm_head);
+        self.llama.maybe_mark_for_ram(max_bytes)
     }
 }

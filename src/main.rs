@@ -29,27 +29,10 @@ struct LlamaArgs {
     #[arg(short, long, default_value_t = 10)]
     num_tokens: usize,
 
-    /// Maximum number of **megabytes** available in RAM to store
-    /// *model* weights.
-    ///
-    /// This can be used in combination with --cuda-mb-for-model; You
-    /// can have model weights loaded in both cpu and cuda.
-    ///
-    /// Value of 0 means **no** model weights will be loaded
-    /// into RAM.
-    #[arg(long, default_value_t = 0)]
-    cpu_mb_for_model: usize,
-
-    /// Maximum number of **megabytes** available in CUDA RAM
+    /// Maximum number of **megabytes** available
     /// to store *model* weights.
-    ///
-    /// This can be used in combination with --cpu-mb-for-model; You
-    /// can have model weights loaded in both cpu and cuda.
-    ///
-    /// Value of 0 means **no** model weights will be loaded
-    /// into CUDA.
-    #[arg(long, default_value_t = 13476)]
-    cuda_mb_for_model: usize,
+    #[arg(long, default_value = None)]
+    ram_limit_for_model: Option<usize>,
 
     /// Disable the KV cache. This will slow computations down,
     /// but reduce memory usage.
@@ -71,23 +54,18 @@ fn main() {
     let dev: modeling::Dev = Default::default();
 
     let mut llama = load_on_disk(args.model.clone());
-    println!("Model size: {} MB", llama.num_bytes() / MB);
+    let model_num_bytes = llama.num_bytes();
+    println!("Model size: {} MB", model_num_bytes / MB);
 
-    #[cfg(feature = "cuda")]
-    {
-        let cuda_bytes = args.cuda_mb_for_model * MB;
-        println!("Loading model weights into CUDA...");
-        let unused_bytes = llama.maybe_load_on(cuda_bytes, &dev);
-        println!("Used {} MB of CUDA ram", (cuda_bytes - unused_bytes) / MB);
-    }
-
-    {
-        let cpu_bytes = args.cpu_mb_for_model * MB;
-        println!("Loading model weights into CPU...");
-        let cpu: Cpu = Default::default();
-        let unused_bytes = llama.maybe_load_on(cpu_bytes, &cpu);
-        println!("Used {} MB of CPU ram", (cpu_bytes - unused_bytes) / MB);
-    }
+    let max_bytes = args
+        .ram_limit_for_model
+        .map(|x| x * MB)
+        .unwrap_or(model_num_bytes);
+    let unused_bytes = llama.deferred_load(max_bytes);
+    println!(
+        "{} MB of model parameters will be held in RAM.",
+        (max_bytes - unused_bytes) / MB
+    );
 
     let tokenizer =
         SentencePieceBpeTokenizer::from_file(args.model + "/tokenizer.model", false).unwrap();
