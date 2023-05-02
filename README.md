@@ -1,9 +1,11 @@
-# LLaMa 7b in dfdx
+# LLaMa 7b in rust
 
 [![](https://dcbadge.vercel.app/api/server/AtUhGqBDP5)](https://discord.gg/AtUhGqBDP5)
 
 This repo contains the popular [LLaMa 7b](https://ai.facebook.com/blog/large-language-model-llama-meta-ai/)
-language model, with tensor ops and CUDA acceleration provided by [dfdx](https://github.com/coreylowman/dfdx).
+language model, fully implemented in the rust programming language!
+
+Uses [dfdx](https://github.com/coreylowman/dfdx) tensors and CUDA acceleration.
 
 # How To Run
 
