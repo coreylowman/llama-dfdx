@@ -13,7 +13,7 @@ use dfdx::{
     tensor::*,
     tensor_ops::*,
 };
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, SeedableRng};
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
 const MB: usize = 1_000_000;
@@ -57,6 +57,10 @@ struct LlamaArgs {
     /// The temperature value when using non-greedy sampling
     #[arg(long, default_value_t = 0.8)]
     temperature: f32,
+
+    /// The number of tokens to consider when using non-greedy sampling.
+    #[arg(long, default_value_t = modeling::VOCAB)]
+    top_k: usize,
 }
 
 fn get_prompt_from_cli() -> String {
@@ -131,31 +135,10 @@ fn main() {
             cache = (!args.disable_cache).then(|| out.1);
             let vocab = logits.select(dev.tensor([seq_len - 1]));
             let new_token = if args.greedy {
-                let logits = vocab.as_vec();
-                logits
-                    .iter()
-                    .enumerate()
-                    .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
-                    .map(|x| x.0)
-                    .unwrap()
+                sampling::greedy(vocab.to_dtype::<f32>().as_vec())
             } else {
                 let probs = (vocab.to_dtype::<f32>() / args.temperature).softmax::<Axis<1>>();
-                let mut probs_sort = probs.as_vec().into_iter().enumerate().collect::<Vec<_>>();
-                probs_sort.sort_unstable_by(|&(_, a), &(_, b)| b.total_cmp(&a)); // NOTE: descending
-                let mut total = 0.0;
-                let mut n_choices = modeling::VOCAB;
-                for i in 0..n_choices {
-                    total += probs_sort[i].1;
-                    if total >= args.top_p {
-                        n_choices = i + 1;
-                        break;
-                    }
-                }
-                let p: f32 = rng.gen_range(0.0..total);
-                for i in 0..n_choices {
-                    if probs_sort[i].1 >= p {}
-                }
-                todo!();
+                sampling::top_p(probs.as_vec(), args.top_p, args.top_k, &mut rng)
             };
 
             tokens.push(new_token);
