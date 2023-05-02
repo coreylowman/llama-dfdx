@@ -14,7 +14,7 @@ pub fn top_p(probs: Vec<f32>, top_p: f32, top_k: usize, rng: &mut StdRng) -> usi
     let mut probs_sort: Vec<(usize, f32)> = probs.into_iter().enumerate().collect::<Vec<_>>();
 
     // NOTE: descending
-    probs_sort.sort_unstable_by(|&(_, a), &(_, b)| b.total_cmp(&a));
+    probs_sort.sort_unstable_by(|(_, a), (_, b)| b.total_cmp(a));
 
     // Only keep first top_k values
     let mut n_choices = top_k;
@@ -22,7 +22,7 @@ pub fn top_p(probs: Vec<f32>, top_p: f32, top_k: usize, rng: &mut StdRng) -> usi
     // Only keep first n_choices values,
     // where `sum(probs_sort[..n_choices]) >= top_p`
     let mut total = 0.0;
-    for &(i, prob) in probs_sort.iter().take(n_choices) {
+    for (i, &(_, prob)) in probs_sort.iter().enumerate().take(n_choices) {
         total += prob;
         if total >= top_p {
             n_choices = i + 1;

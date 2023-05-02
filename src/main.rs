@@ -58,7 +58,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Generates text with a prompt from STDIN.
+    /// Chat back and forth interactively with the model using
+    /// stdio.
     Chat,
 
     /// Generates text with a prompt from the CLI.
@@ -98,6 +99,7 @@ fn main() {
                 print!("{new_content}");
                 std::io::stdout().flush().unwrap();
             }
+            println!();
         }
         Commands::File { path } => {
             let prompt = std::fs::read_to_string(path).unwrap();
@@ -106,6 +108,7 @@ fn main() {
                 print!("{new_content}");
                 std::io::stdout().flush().unwrap();
             }
+            println!();
         }
         Commands::Chat => {
             let mut conversation = String::new();
@@ -127,6 +130,7 @@ fn main() {
                     std::io::stdout().flush().unwrap();
                     num_tokens_generated += 1;
                 }
+                println!();
 
                 let elapsed = start.elapsed();
                 let elapsed_s = elapsed.as_secs_f64();
@@ -134,9 +138,9 @@ fn main() {
                 let ms_per_token = 1000.0 * elapsed_s / num_tokens_generated as f64;
 
                 println!(
-                "\n\nGenerated {} tokens in {:.3?} ({tokens_per_s:.3} tokens/s, {ms_per_token:.0} ms/token)",
-                num_tokens_generated, elapsed
-            );
+                    "\n*Generated {} tokens in {:.3?} ({tokens_per_s:.3} tokens/s, {ms_per_token:.0} ms/token)*",
+                    num_tokens_generated, elapsed
+                );
             }
         }
     }
