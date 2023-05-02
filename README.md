@@ -1,7 +1,9 @@
-# LLaMa in dfdx
+# LLaMa 7b in dfdx
+
+[![](https://dcbadge.vercel.app/api/server/AtUhGqBDP5)](https://discord.gg/AtUhGqBDP5)
 
 This repo contains the popular [LLaMa 7b](https://ai.facebook.com/blog/large-language-model-llama-meta-ai/)
-language model, implemented in [dfdx](https://github.com/coreylowman/dfdx).
+language model, with tensor ops and CUDA acceleration provided by [dfdx](https://github.com/coreylowman/dfdx).
 
 # How To Run
 
