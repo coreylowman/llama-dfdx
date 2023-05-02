@@ -58,7 +58,7 @@ pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
     }
 }
 
-macro_rules! maybe_mark {
+macro_rules! maybe_load {
     ($MaxBytes:tt, $Field:expr) => {
         if $MaxBytes >= $Field.num_bytes() && $Field.is_on_disk() {
             $Field.defer_load();
@@ -72,8 +72,8 @@ impl super::modeling::RMSNorm {
         self.weight.num_bytes()
     }
 
-    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
-        maybe_mark!(max_bytes, self.weight);
+    pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
+        maybe_load!(max_bytes, self.weight);
         max_bytes
     }
 }
@@ -83,8 +83,8 @@ impl super::modeling::RotaryEmbedding {
         self.inv_freq.num_bytes()
     }
 
-    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
-        maybe_mark!(max_bytes, self.inv_freq);
+    pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
+        maybe_load!(max_bytes, self.inv_freq);
         max_bytes
     }
 }
@@ -98,12 +98,12 @@ impl super::modeling::Attention {
             + self.rotary_embed.num_bytes()
     }
 
-    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
-        maybe_mark!(max_bytes, self.q_proj);
-        maybe_mark!(max_bytes, self.k_proj);
-        maybe_mark!(max_bytes, self.v_proj);
-        maybe_mark!(max_bytes, self.o_proj);
-        self.rotary_embed.maybe_mark_for_ram(max_bytes)
+    pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
+        maybe_load!(max_bytes, self.q_proj);
+        maybe_load!(max_bytes, self.k_proj);
+        maybe_load!(max_bytes, self.v_proj);
+        maybe_load!(max_bytes, self.o_proj);
+        self.rotary_embed.deferred_load(max_bytes)
     }
 }
 
@@ -112,10 +112,10 @@ impl super::modeling::MLP {
         self.gate_proj.num_bytes() + self.down_proj.num_bytes() + self.up_proj.num_bytes()
     }
 
-    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
-        maybe_mark!(max_bytes, self.gate_proj);
-        maybe_mark!(max_bytes, self.down_proj);
-        maybe_mark!(max_bytes, self.up_proj);
+    pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
+        maybe_load!(max_bytes, self.gate_proj);
+        maybe_load!(max_bytes, self.down_proj);
+        maybe_load!(max_bytes, self.up_proj);
         max_bytes
     }
 }
@@ -128,11 +128,11 @@ impl super::modeling::DecoderLayer {
             + self.post_attention_layer_norm.num_bytes()
     }
 
-    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
-        max_bytes = self.self_attn.maybe_mark_for_ram(max_bytes);
-        max_bytes = self.mlp.maybe_mark_for_ram(max_bytes);
-        max_bytes = self.input_layer_norm.maybe_mark_for_ram(max_bytes);
-        max_bytes = self.post_attention_layer_norm.maybe_mark_for_ram(max_bytes);
+    pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
+        max_bytes = self.self_attn.deferred_load(max_bytes);
+        max_bytes = self.mlp.deferred_load(max_bytes);
+        max_bytes = self.input_layer_norm.deferred_load(max_bytes);
+        max_bytes = self.post_attention_layer_norm.deferred_load(max_bytes);
         max_bytes
     }
 }
@@ -144,12 +144,12 @@ impl super::modeling::Llama {
             + self.norm.num_bytes()
     }
 
-    pub fn maybe_mark_for_ram(&mut self, mut max_bytes: usize) -> usize {
-        maybe_mark!(max_bytes, self.embed_tokens);
+    pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
+        maybe_load!(max_bytes, self.embed_tokens);
         for layer in self.layers.iter_mut() {
-            max_bytes = layer.maybe_mark_for_ram(max_bytes);
+            max_bytes = layer.deferred_load(max_bytes);
         }
-        self.norm.maybe_mark_for_ram(max_bytes)
+        self.norm.deferred_load(max_bytes)
     }
 }
 
@@ -159,7 +159,7 @@ impl super::modeling::LlamaForCausalLM {
     }
 
     pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
-        maybe_mark!(max_bytes, self.lm_head);
-        self.llama.maybe_mark_for_ram(max_bytes)
+        maybe_load!(max_bytes, self.lm_head);
+        self.llama.deferred_load(max_bytes)
     }
 }
