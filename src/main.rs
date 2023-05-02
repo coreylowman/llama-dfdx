@@ -1,13 +1,14 @@
 mod lazy;
 mod loading;
 mod modeling;
+mod pipeline;
 mod sampling;
 
 use std::io::Write;
 
 use self::loading::load_on_disk;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use dfdx::{
     shapes::{Axis, Const, HasShape},
     tensor::*,
@@ -21,7 +22,11 @@ const MB: usize = 1_000_000;
 /// Run text generation with the LLaMa 7b model
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-struct LlamaArgs {
+#[command(propagate_version = true)]
+struct CLI {
+    #[command(subcommand)]
+    command: Commands,
+
     /// Seed for device & sampling RNG.
     #[arg(long, default_value_t = 0)]
     seed: u64,
@@ -63,6 +68,18 @@ struct LlamaArgs {
     top_k: usize,
 }
 
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Asks for prompts on the CLI.
+    Interactive,
+
+    /// Generates text from a given prompt a single time.
+    Generate {
+        /// The text to begin generation from.
+        prompt: String,
+    },
+}
+
 fn get_prompt_from_cli() -> String {
     let mut user_input = String::new();
     std::print!("Enter prompt > ");
@@ -72,7 +89,7 @@ fn get_prompt_from_cli() -> String {
 }
 
 fn main() {
-    let args = LlamaArgs::parse();
+    let args = CLI::parse();
 
     let mut rng = StdRng::seed_from_u64(args.seed);
     let dev: modeling::Dev = modeling::Dev::seed_from_u64(args.seed);
