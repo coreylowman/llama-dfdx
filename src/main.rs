@@ -1,6 +1,7 @@
 mod lazy;
 mod loading;
 mod modeling;
+mod sampling;
 
 use std::io::Write;
 
@@ -8,10 +9,11 @@ use self::loading::load_on_disk;
 
 use clap::Parser;
 use dfdx::{
-    shapes::{Const, HasShape},
+    shapes::{Axis, Const, HasShape},
     tensor::*,
     tensor_ops::*,
 };
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
 const MB: usize = 1_000_000;
@@ -20,6 +22,10 @@ const MB: usize = 1_000_000;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct LlamaArgs {
+    /// Seed for device & sampling RNG.
+    #[arg(long, default_value_t = 0)]
+    seed: u64,
+
     /// Root directory of the **converted** model. Use `convert.py` to convert the PyTorch `.bin` to
     /// the correct format.
     #[arg(short, long, default_value = "llama-7b-hf")]
@@ -38,6 +44,19 @@ struct LlamaArgs {
     /// but reduce memory usage.
     #[arg(long, default_value_t = false)]
     disable_cache: bool,
+
+    /// Whether to do greedy sampling or top_p sampling with
+    /// top_p = `0.95`, and temperature = `0.8`.
+    #[arg(long, default_value_t = false)]
+    greedy: bool,
+
+    /// The top probability value when using non-greedy sampling
+    #[arg(long, default_value_t = 0.95)]
+    top_p: f32,
+
+    /// The temperature value when using non-greedy sampling
+    #[arg(long, default_value_t = 0.8)]
+    temperature: f32,
 }
 
 fn get_prompt_from_cli() -> String {
@@ -51,7 +70,8 @@ fn get_prompt_from_cli() -> String {
 fn main() {
     let args = LlamaArgs::parse();
 
-    let dev: modeling::Dev = Default::default();
+    let mut rng = StdRng::seed_from_u64(args.seed);
+    let dev: modeling::Dev = modeling::Dev::seed_from_u64(args.seed);
 
     let mut llama = load_on_disk(args.model.clone());
     let model_num_bytes = llama.num_bytes();
@@ -110,13 +130,34 @@ fn main() {
             let logits = out.0;
             cache = (!args.disable_cache).then(|| out.1);
             let vocab = logits.select(dev.tensor([seq_len - 1]));
-            let logits = vocab.as_vec();
-            let new_token = logits
-                .iter()
-                .enumerate()
-                .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
-                .map(|x| x.0)
-                .unwrap();
+            let new_token = if args.greedy {
+                let logits = vocab.as_vec();
+                logits
+                    .iter()
+                    .enumerate()
+                    .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
+                    .map(|x| x.0)
+                    .unwrap()
+            } else {
+                let probs = (vocab.to_dtype::<f32>() / args.temperature).softmax::<Axis<1>>();
+                let mut probs_sort = probs.as_vec().into_iter().enumerate().collect::<Vec<_>>();
+                probs_sort.sort_unstable_by(|&(_, a), &(_, b)| b.total_cmp(&a)); // NOTE: descending
+                let mut total = 0.0;
+                let mut n_choices = modeling::VOCAB;
+                for i in 0..n_choices {
+                    total += probs_sort[i].1;
+                    if total >= args.top_p {
+                        n_choices = i + 1;
+                        break;
+                    }
+                }
+                let p: f32 = rng.gen_range(0.0..total);
+                for i in 0..n_choices {
+                    if probs_sort[i].1 >= p {}
+                }
+                todo!();
+            };
+
             tokens.push(new_token);
 
             if new_token == EOS_TOKEN {
