@@ -32,7 +32,7 @@ pub struct RMSNorm {
 
 impl RMSNorm {
     fn forward<Batch: Dim, Seq: Dim>(
-        &self,
+        &mut self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev> {
         let x_f32 = x.to_dtype::<f32>();
@@ -50,7 +50,7 @@ pub struct RotaryEmbedding {
 
 impl RotaryEmbedding {
     fn forward<Batch: Dim, Seq: Dim>(
-        &self,
+        &mut self,
         q: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
         k: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
         offset: usize,
@@ -67,7 +67,7 @@ impl RotaryEmbedding {
     }
 
     fn get_sincos<Seq: Dim>(
-        &self,
+        &mut self,
         device: &Dev,
         offset: usize,
         seq: Seq,
@@ -108,7 +108,7 @@ pub struct Attention {
 
 impl Attention {
     fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
-        &self,
+        &mut self,
         x: Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
         attn_mask: Tensor<(CurSeq, TotSeq), f16, Dev>,
         cache: Option<Cache<Batch, PastSeq>>,
@@ -190,7 +190,7 @@ pub struct MLP {
 
 impl MLP {
     fn forward<Batch: Dim, Seq: Dim>(
-        &self,
+        &mut self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev>,
     ) -> Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev> {
         let gate = {
@@ -217,7 +217,7 @@ pub struct DecoderLayer {
 
 impl DecoderLayer {
     fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
-        &self,
+        &mut self,
         x: Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
         attn_mask: Tensor<(CurSeq, TotSeq), f16, Dev>,
         cache: Option<Cache<Batch, PastSeq>>,
@@ -245,7 +245,7 @@ pub struct Llama {
 
 impl Llama {
     fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
-        &self,
+        &mut self,
         input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
         cache: Option<Vec<Cache<Batch, PastSeq>>>,
     ) -> (
@@ -283,7 +283,7 @@ impl Llama {
             .map(|cs| cs.into_iter().map(|c| Some(c)).collect())
             .unwrap_or_else(|| vec![None; self.layers.len()]);
         assert_eq!(cache.len(), self.layers.len());
-        for (layer_i, cache_i) in self.layers.iter().zip(cache.into_iter()) {
+        for (layer_i, cache_i) in self.layers.iter_mut().zip(cache.into_iter()) {
             let out = layer_i.forward(hidden_states, attn_mask.clone(), cache_i);
             hidden_states = out.0;
             new_caches.push(out.1);
@@ -300,7 +300,7 @@ pub struct LlamaForCausalLM {
 
 impl LlamaForCausalLM {
     pub fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
-        &self,
+        &mut self,
         input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
         cache: Option<Vec<Cache<Batch, PastSeq>>>,
     ) -> (

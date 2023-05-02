@@ -26,30 +26,13 @@ struct LlamaArgs {
     model: String,
 
     /// Number of new tokens to generate for each prompt.
-    #[arg(short, long, default_value_t = 10)]
+    #[arg(short, long, default_value_t = 512)]
     num_tokens: usize,
 
-    /// Maximum number of **megabytes** available in RAM to store
-    /// *model* weights.
-    ///
-    /// This can be used in combination with --cuda-mb-for-model; You
-    /// can have model weights loaded in both cpu and cuda.
-    ///
-    /// Value of 0 means **no** model weights will be loaded
-    /// into RAM.
-    #[arg(long, default_value_t = 0)]
-    cpu_mb_for_model: usize,
-
-    /// Maximum number of **megabytes** available in CUDA RAM
+    /// Maximum number of **megabytes** available
     /// to store *model* weights.
-    ///
-    /// This can be used in combination with --cpu-mb-for-model; You
-    /// can have model weights loaded in both cpu and cuda.
-    ///
-    /// Value of 0 means **no** model weights will be loaded
-    /// into CUDA.
-    #[arg(long, default_value_t = 13476)]
-    cuda_mb_for_model: usize,
+    #[arg(long, default_value = None)]
+    ram_limit_for_model: Option<usize>,
 
     /// Disable the KV cache. This will slow computations down,
     /// but reduce memory usage.
@@ -71,35 +54,35 @@ fn main() {
     let dev: modeling::Dev = Default::default();
 
     let mut llama = load_on_disk(args.model.clone());
-    println!("Model size: {} MB", llama.num_bytes() / MB);
+    let model_num_bytes = llama.num_bytes();
+    println!("Model size: {} MB", model_num_bytes / MB);
 
-    #[cfg(feature = "cuda")]
-    {
-        let cuda_bytes = args.cuda_mb_for_model * MB;
-        println!("Loading model weights into CUDA...");
-        let unused_bytes = llama.maybe_load_on(cuda_bytes, &dev);
-        println!("Used {} MB of CUDA ram", (cuda_bytes - unused_bytes) / MB);
-    }
-
-    {
-        let cpu_bytes = args.cpu_mb_for_model * MB;
-        println!("Loading model weights into CPU...");
-        let cpu: Cpu = Default::default();
-        let unused_bytes = llama.maybe_load_on(cpu_bytes, &cpu);
-        println!("Used {} MB of CPU ram", (cpu_bytes - unused_bytes) / MB);
-    }
+    let max_bytes = args
+        .ram_limit_for_model
+        .map(|x| x * MB)
+        .unwrap_or(model_num_bytes);
+    let unused_bytes = llama.deferred_load(max_bytes);
+    println!(
+        "{} MB of model parameters will be held in RAM.",
+        (max_bytes - unused_bytes) / MB
+    );
 
     let tokenizer =
         SentencePieceBpeTokenizer::from_file(args.model + "/tokenizer.model", false).unwrap();
 
-    const BOS_TOKEN: usize = 0;
-    const EOS_TOKEN: usize = 1;
+    const BOS_TOKEN: usize = 1;
+    const EOS_TOKEN: usize = 2;
+    const NEWLINE_TOKEN: usize = 13;
 
     loop {
         let prompt = get_prompt_from_cli();
         let prompt = prompt.trim_end();
-        let tokenized_input =
-            tokenizer.encode_list(&[prompt], 128, &TruncationStrategy::LongestFirst, 0);
+        let tokenized_input = tokenizer.encode_list(
+            &[prompt],
+            prompt.len(),
+            &TruncationStrategy::LongestFirst,
+            0,
+        );
 
         let mut tokens: Vec<usize> = tokenized_input[0]
             .token_ids
@@ -113,6 +96,8 @@ fn main() {
         let mut cache: Option<Vec<modeling::Cache<Const<1>, usize>>> = None;
 
         let mut output: String = prompt.into();
+
+        let start = std::time::Instant::now();
 
         for i_token in 0..args.num_tokens {
             let n_tokens = tokens.len();
@@ -133,15 +118,27 @@ fn main() {
                 .map(|x| x.0)
                 .unwrap();
             tokens.push(new_token);
+
             if new_token == EOS_TOKEN {
                 break;
             }
 
-            let new_content = tokenizer.decode(&[new_token as i64], false, false);
+            let new_content = if new_token == NEWLINE_TOKEN {
+                "\n".into()
+            } else {
+                tokenizer.decode(&[new_token as i64], true, false)
+            };
             output.push_str(&new_content);
             print!("{}", if i_token == 0 { &output } else { &new_content });
             std::io::stdout().flush().unwrap();
         }
-        println!();
+
+        let elapsed = start.elapsed();
+        let tokens_per_s = args.num_tokens as f64 / elapsed.as_secs_f64();
+
+        println!(
+            "\nGenerated {} tokens in {:.3?}. {tokens_per_s:.3} tokens/s",
+            args.num_tokens, elapsed
+        );
     }
 }
