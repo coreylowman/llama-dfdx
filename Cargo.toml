@@ -11,6 +11,7 @@ dfdx = { git = "https://github.com/coreylowman/dfdx.git", branch = "main", defau
 memmap2 = "0.5.10"
 clap = { version = "4.2.5", features = ["derive"] }
 rust_tokenizers = "8.1.0"
+rand = { version = "0.8.5", default-features = false, features = ["std_rng"] }
 
 [features]
 default = []

@@ -1,6 +1,7 @@
 mod lazy;
 mod loading;
 mod modeling;
+mod sampling;
 
 use std::io::Write;
 
@@ -8,10 +9,11 @@ use self::loading::load_on_disk;
 
 use clap::Parser;
 use dfdx::{
-    shapes::{Const, HasShape},
+    shapes::{Axis, Const, HasShape},
     tensor::*,
     tensor_ops::*,
 };
+use rand::{rngs::StdRng, SeedableRng};
 use rust_tokenizers::tokenizer::{SentencePieceBpeTokenizer, Tokenizer, TruncationStrategy};
 
 const MB: usize = 1_000_000;
@@ -20,13 +22,17 @@ const MB: usize = 1_000_000;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct LlamaArgs {
+    /// Seed for device & sampling RNG.
+    #[arg(long, default_value_t = 0)]
+    seed: u64,
+
     /// Root directory of the **converted** model. Use `convert.py` to convert the PyTorch `.bin` to
     /// the correct format.
     #[arg(short, long, default_value = "llama-7b-hf")]
     model: String,
 
     /// Number of new tokens to generate for each prompt.
-    #[arg(short, long, default_value_t = 512)]
+    #[arg(short, long, default_value_t = 128)]
     num_tokens: usize,
 
     /// Maximum number of **megabytes** available
@@ -38,6 +44,23 @@ struct LlamaArgs {
     /// but reduce memory usage.
     #[arg(long, default_value_t = false)]
     disable_cache: bool,
+
+    /// Whether to do greedy sampling or top_p sampling with
+    /// top_p = `0.95`, and temperature = `0.8`.
+    #[arg(long, default_value_t = false)]
+    greedy: bool,
+
+    /// The top probability value when using non-greedy sampling
+    #[arg(long, default_value_t = 0.95)]
+    top_p: f32,
+
+    /// The temperature value when using non-greedy sampling
+    #[arg(long, default_value_t = 0.8)]
+    temperature: f32,
+
+    /// The number of tokens to consider when using non-greedy sampling.
+    #[arg(long, default_value_t = 40)]
+    top_k: usize,
 }
 
 fn get_prompt_from_cli() -> String {
@@ -51,7 +74,8 @@ fn get_prompt_from_cli() -> String {
 fn main() {
     let args = LlamaArgs::parse();
 
-    let dev: modeling::Dev = Default::default();
+    let mut rng = StdRng::seed_from_u64(args.seed);
+    let dev: modeling::Dev = modeling::Dev::seed_from_u64(args.seed);
 
     let mut llama = load_on_disk(args.model.clone());
     let model_num_bytes = llama.num_bytes();
@@ -98,6 +122,7 @@ fn main() {
         let mut output: String = prompt.into();
 
         let start = std::time::Instant::now();
+        let mut num_tokens_generated = 0;
 
         for i_token in 0..args.num_tokens {
             let n_tokens = tokens.len();
@@ -110,14 +135,15 @@ fn main() {
             let logits = out.0;
             cache = (!args.disable_cache).then(|| out.1);
             let vocab = logits.select(dev.tensor([seq_len - 1]));
-            let logits = vocab.as_vec();
-            let new_token = logits
-                .iter()
-                .enumerate()
-                .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
-                .map(|x| x.0)
-                .unwrap();
+            let new_token = if args.greedy {
+                sampling::greedy(vocab.to_dtype::<f32>().as_vec())
+            } else {
+                let probs = (vocab.to_dtype::<f32>() / args.temperature).softmax::<Axis<1>>();
+                sampling::top_p(probs.as_vec(), args.top_p, args.top_k, &mut rng)
+            };
+
             tokens.push(new_token);
+            num_tokens_generated += 1;
 
             if new_token == EOS_TOKEN {
                 break;
@@ -134,11 +160,13 @@ fn main() {
         }
 
         let elapsed = start.elapsed();
-        let tokens_per_s = args.num_tokens as f64 / elapsed.as_secs_f64();
+        let elapsed_s = elapsed.as_secs_f64();
+        let tokens_per_s = num_tokens_generated as f64 / elapsed_s;
+        let ms_per_token = 1000.0 * elapsed_s / num_tokens_generated as f64;
 
         println!(
-            "\nGenerated {} tokens in {:.3?}. {tokens_per_s:.3} tokens/s",
-            args.num_tokens, elapsed
+            "\nGenerated {} tokens in {:.3?} ({tokens_per_s:.3} tokens/s, {ms_per_token:.0} ms/token)",
+            num_tokens_generated, elapsed
         );
     }
 }
