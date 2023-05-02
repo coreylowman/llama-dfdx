@@ -26,7 +26,7 @@ struct LlamaArgs {
     model: String,
 
     /// Number of new tokens to generate for each prompt.
-    #[arg(short, long, default_value_t = 10)]
+    #[arg(short, long, default_value_t = 512)]
     num_tokens: usize,
 
     /// Maximum number of **megabytes** available
@@ -70,14 +70,19 @@ fn main() {
     let tokenizer =
         SentencePieceBpeTokenizer::from_file(args.model + "/tokenizer.model", false).unwrap();
 
-    const BOS_TOKEN: usize = 0;
-    const EOS_TOKEN: usize = 1;
+    const BOS_TOKEN: usize = 1;
+    const EOS_TOKEN: usize = 2;
+    const NEWLINE_TOKEN: usize = 13;
 
     loop {
         let prompt = get_prompt_from_cli();
         let prompt = prompt.trim_end();
-        let tokenized_input =
-            tokenizer.encode_list(&[prompt], 128, &TruncationStrategy::LongestFirst, 0);
+        let tokenized_input = tokenizer.encode_list(
+            &[prompt],
+            prompt.len(),
+            &TruncationStrategy::LongestFirst,
+            0,
+        );
 
         let mut tokens: Vec<usize> = tokenized_input[0]
             .token_ids
@@ -91,6 +96,8 @@ fn main() {
         let mut cache: Option<Vec<modeling::Cache<Const<1>, usize>>> = None;
 
         let mut output: String = prompt.into();
+
+        let start = std::time::Instant::now();
 
         for i_token in 0..args.num_tokens {
             let n_tokens = tokens.len();
@@ -111,15 +118,27 @@ fn main() {
                 .map(|x| x.0)
                 .unwrap();
             tokens.push(new_token);
+
             if new_token == EOS_TOKEN {
                 break;
             }
 
-            let new_content = tokenizer.decode(&[new_token as i64], false, false);
+            let new_content = if new_token == NEWLINE_TOKEN {
+                "\n".into()
+            } else {
+                tokenizer.decode(&[new_token as i64], true, false)
+            };
             output.push_str(&new_content);
             print!("{}", if i_token == 0 { &output } else { &new_content });
             std::io::stdout().flush().unwrap();
         }
-        println!();
+
+        let elapsed = start.elapsed();
+        let tokens_per_s = args.num_tokens as f64 / elapsed.as_secs_f64();
+
+        println!(
+            "\nGenerated {} tokens in {:.3?}. {tokens_per_s:.3} tokens/s",
+            args.num_tokens, elapsed
+        );
     }
 }
