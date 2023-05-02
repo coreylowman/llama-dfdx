@@ -58,7 +58,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
             } => *shape,
             Self::Cpu(tensor) => *tensor.shape(),
             #[cfg(feature = "cuda")]
-            Self::CUDA(tensor) => *tensor.shape(),
+            Self::Cuda(tensor) => *tensor.shape(),
         }
     }
 
@@ -98,7 +98,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
                         #[cfg(feature = "cuda")]
                         if TypeId::of::<D>() == TypeId::of::<dfdx::tensor::Cuda>() {
                             let tensor: Box<dyn Any> = Box::new(loaded.clone());
-                            *self = Self::CUDA(*tensor.downcast().unwrap());
+                            *self = Self::Cuda(*tensor.downcast().unwrap());
                         } else {
                             panic!("Unsupported device found (not Cpu/Cuda");
                         }
@@ -130,7 +130,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
                 }
             }
             #[cfg(feature = "cuda")]
-            Self::CUDA(tensor) => {
+            Self::Cuda(tensor) => {
                 if TypeId::of::<D>() == TypeId::of::<dfdx::tensor::Cuda>() {
                     // See comment in corresponding Self::CPU branch.
                     let t: Box<dyn Any> = Box::new(tensor.clone());
