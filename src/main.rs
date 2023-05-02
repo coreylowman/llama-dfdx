@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]
-struct CLI {
+struct Cli {
     #[command(subcommand)]
     command: Commands,
 
@@ -75,7 +75,7 @@ enum Commands {
 }
 
 fn main() {
-    let args = CLI::parse();
+    let args = Cli::parse();
 
     let mut pipeline = pipeline::LlamaPipeline::new(
         args.model,

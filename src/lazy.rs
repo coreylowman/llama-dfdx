@@ -20,13 +20,13 @@ pub enum LazyTensor<S: Shape, E: Unit> {
 
 impl<S: Shape, E: Unit> LazyTensor<S, E> {
     pub fn defer_load(&mut self) {
-        match self {
-            Self::Disk {
-                path: _,
-                shape: _,
-                move_to_ram,
-            } => *move_to_ram = true,
-            _ => {}
+        if let Self::Disk {
+            path: _,
+            shape: _,
+            move_to_ram,
+        } = self
+        {
+            *move_to_ram = true;
         }
     }
 }
@@ -37,16 +37,7 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
     }
 
     pub fn is_on_disk(&self) -> bool {
-        if let Self::Disk {
-            path: _,
-            shape: _,
-            move_to_ram: _,
-        } = self
-        {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::Disk { .. })
     }
 
     fn shape(&self) -> S {

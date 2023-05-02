@@ -92,7 +92,7 @@ impl LlamaPipeline {
 
         let mut cache: Option<Vec<super::modeling::Cache<Const<1>, usize>>> = None;
 
-        let cfg = self.cfg.clone();
+        let cfg = self.cfg;
         (0..cfg.num_tokens)
             .map(move |_| {
                 let n_tokens = tokens.len();
@@ -105,7 +105,7 @@ impl LlamaPipeline {
                 let seq_len = input_ids.shape().1;
                 let out = self.llama.forward(input_ids, cache.clone());
                 let logits = out.0;
-                cache = (!cfg.disable_cache).then(|| out.1);
+                cache = (!cfg.disable_cache).then_some(out.1);
                 let vocab = logits.select(self.device.tensor([seq_len - 1]));
                 let new_token = if cfg.greedy {
                     sampling::greedy(vocab.to_dtype::<f32>().as_vec())

@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use super::lazy::LazyTensor;
 
 use dfdx::{
@@ -182,13 +184,13 @@ impl Attention {
 }
 
 #[derive(Debug)]
-pub struct MLP {
+pub struct Mlp {
     pub gate_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, f16>,
     pub down_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, f16>,
     pub up_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, f16>,
 }
 
-impl MLP {
+impl Mlp {
     fn forward<Batch: Dim, Seq: Dim>(
         &mut self,
         x: Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev>,
@@ -210,7 +212,7 @@ impl MLP {
 #[derive(Debug)]
 pub struct DecoderLayer {
     pub self_attn: Attention,
-    pub mlp: MLP,
+    pub mlp: Mlp,
     pub input_layer_norm: RMSNorm,
     pub post_attention_layer_norm: RMSNorm,
 }
@@ -280,7 +282,7 @@ impl Llama {
         };
         let mut new_caches = Vec::with_capacity(self.layers.len());
         let cache = cache
-            .map(|cs| cs.into_iter().map(|c| Some(c)).collect())
+            .map(|cs| cs.into_iter().map(Some).collect())
             .unwrap_or_else(|| vec![None; self.layers.len()]);
         assert_eq!(cache.len(), self.layers.len());
         for (layer_i, cache_i) in self.layers.iter_mut().zip(cache.into_iter()) {

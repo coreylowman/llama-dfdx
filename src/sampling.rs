@@ -4,7 +4,7 @@ pub fn greedy(probs: Vec<f32>) -> usize {
     probs
         .iter()
         .enumerate()
-        .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap())
+        .max_by(|x, y| x.1.partial_cmp(y.1).unwrap())
         .map(|x| x.0)
         .unwrap()
 }
@@ -22,8 +22,8 @@ pub fn top_p(probs: Vec<f32>, top_p: f32, top_k: usize, rng: &mut StdRng) -> usi
     // Only keep first n_choices values,
     // where `sum(probs_sort[..n_choices]) >= top_p`
     let mut total = 0.0;
-    for i in 0..n_choices {
-        total += probs_sort[i].1;
+    for &(i, prob) in probs_sort.iter().take(n_choices) {
+        total += prob;
         if total >= top_p {
             n_choices = i + 1;
             break;
@@ -35,10 +35,10 @@ pub fn top_p(probs: Vec<f32>, top_p: f32, top_k: usize, rng: &mut StdRng) -> usi
     // and also sampling from a multinomial distribution.
     let p: f32 = rng.gen_range(0.0..total);
     let mut total = 0.0;
-    for i in 0..n_choices {
-        total += probs_sort[i].1;
+    for &(i, prob) in probs_sort.iter().take(n_choices) {
+        total += prob;
         if total >= p {
-            return probs_sort[i].0;
+            return i;
         }
     }
 
