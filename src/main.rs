@@ -32,7 +32,7 @@ struct LlamaArgs {
     model: String,
 
     /// Number of new tokens to generate for each prompt.
-    #[arg(short, long, default_value_t = 512)]
+    #[arg(short, long, default_value_t = 128)]
     num_tokens: usize,
 
     /// Maximum number of **megabytes** available
@@ -59,7 +59,7 @@ struct LlamaArgs {
     temperature: f32,
 
     /// The number of tokens to consider when using non-greedy sampling.
-    #[arg(long, default_value_t = modeling::VOCAB)]
+    #[arg(long, default_value_t = 40)]
     top_k: usize,
 }
 
@@ -122,6 +122,7 @@ fn main() {
         let mut output: String = prompt.into();
 
         let start = std::time::Instant::now();
+        let mut num_tokens_generated = 0;
 
         for i_token in 0..args.num_tokens {
             let n_tokens = tokens.len();
@@ -142,6 +143,7 @@ fn main() {
             };
 
             tokens.push(new_token);
+            num_tokens_generated += 1;
 
             if new_token == EOS_TOKEN {
                 break;
@@ -158,11 +160,13 @@ fn main() {
         }
 
         let elapsed = start.elapsed();
-        let tokens_per_s = args.num_tokens as f64 / elapsed.as_secs_f64();
+        let elapsed_s = elapsed.as_secs_f64();
+        let tokens_per_s = num_tokens_generated as f64 / elapsed_s;
+        let ms_per_token = 1000.0 * elapsed_s / num_tokens_generated as f64;
 
         println!(
-            "\nGenerated {} tokens in {:.3?}. {tokens_per_s:.3} tokens/s",
-            args.num_tokens, elapsed
+            "\nGenerated {} tokens in {:.3?} ({tokens_per_s:.3} tokens/s, {ms_per_token:.0} ms/token)",
+            num_tokens_generated, elapsed
         );
     }
 }
