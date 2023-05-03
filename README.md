@@ -7,6 +7,8 @@ language model, fully implemented in the rust programming language!
 
 Uses [dfdx](https://github.com/coreylowman/dfdx) tensors and CUDA acceleration.
 
+**This runs LLaMa directly in f16, meaning there is no hardware acceleration on CPU.** Using CUDA is heavily recommended.
+
 # How To Run
 
 ## (Once) Setting up model weights
