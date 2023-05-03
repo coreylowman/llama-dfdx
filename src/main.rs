@@ -106,7 +106,6 @@ fn main() {
         Structure::Auto => {
             let num_bins = std::fs::read_dir(&args.model)
                 .expect("Model directory does not exist.")
-                .into_iter()
                 .filter(|path| path.as_ref().unwrap().path().ends_with(".bin"))
                 .count();
             if num_bins == 33 {
