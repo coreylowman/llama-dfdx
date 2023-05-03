@@ -6,7 +6,26 @@ mod sampling;
 
 use std::io::Write;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(ValueEnum, Debug, Clone)]
+enum Structure {
+    Auto,
+    Llama7b,
+    Llama13b,
+    Llama65b,
+}
+
+impl std::fmt::Display for Structure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Auto => f.write_str("auto"),
+            Self::Llama7b => f.write_str("llama-7b"),
+            Self::Llama13b => f.write_str("llama-13b"),
+            Self::Llama65b => f.write_str("llama-65b"),
+        }
+    }
+}
 
 /// Run text generation with the LLaMa 7b model
 #[derive(Parser, Debug)]
@@ -54,6 +73,11 @@ struct Cli {
     /// The number of tokens to consider when using non-greedy sampling.
     #[arg(long, default_value_t = 40)]
     top_k: usize,
+
+    /// The structure of the model. "auto" will attempt to auto detect
+    /// the structure based on the contents of the `--model` directory.
+    #[arg(long, default_value_t = Structure::Auto)]
+    structure: Structure,
 }
 
 #[derive(Subcommand, Debug)]
@@ -78,23 +102,31 @@ enum Commands {
 fn main() {
     let args = Cli::parse();
 
-    let num_bins = std::fs::read_dir(&args.model)
-        .expect("Model directory does not exist.")
-        .into_iter()
-        .filter(|path| path.as_ref().unwrap().path().ends_with(".bin"))
-        .count();
-
-    if num_bins == 33 {
-        println!("Detected model folder as LLaMa 7b.");
-        run::<modeling::Llama7b>(args);
-    } else if num_bins == 41 {
-        println!("Detected model folder as LLaMa 13b.");
-        run::<modeling::Llama13b>(args);
-    } else if num_bins == 81 {
-        println!("Detected model folder as LLaMa 65b.");
-        run::<modeling::Llama65b>(args);
-    } else {
-        panic!("Found {num_bins} .bin files in the model directory. Expected 33, 41, or 81.");
+    match args.structure {
+        Structure::Auto => {
+            let num_bins = std::fs::read_dir(&args.model)
+                .expect("Model directory does not exist.")
+                .into_iter()
+                .filter(|path| path.as_ref().unwrap().path().ends_with(".bin"))
+                .count();
+            if num_bins == 33 {
+                println!("Detected model folder as LLaMa 7b.");
+                run::<modeling::Llama7b>(args);
+            } else if num_bins == 41 {
+                println!("Detected model folder as LLaMa 13b.");
+                run::<modeling::Llama13b>(args);
+            } else if num_bins == 81 {
+                println!("Detected model folder as LLaMa 65b.");
+                run::<modeling::Llama65b>(args);
+            } else {
+                panic!(
+                    "Found {num_bins} .bin files in the model directory. Expected 33, 41, or 81."
+                );
+            }
+        }
+        Structure::Llama7b => run::<modeling::Llama7b>(args),
+        Structure::Llama13b => run::<modeling::Llama13b>(args),
+        Structure::Llama65b => run::<modeling::Llama65b>(args),
     }
 }
 
