@@ -78,7 +78,28 @@ enum Commands {
 fn main() {
     let args = Cli::parse();
 
-    let mut pipeline = pipeline::LlamaPipeline::new(
+    let num_bins = std::fs::read_dir(&args.model)
+        .expect("Model directory does not exist.")
+        .into_iter()
+        .filter(|path| path.as_ref().unwrap().path().ends_with(".bin"))
+        .count();
+
+    if num_bins == 33 {
+        println!("Detected model folder as LLaMa 7b.");
+        run::<modeling::Llama7b>(args);
+    } else if num_bins == 41 {
+        println!("Detected model folder as LLaMa 13b.");
+        run::<modeling::Llama13b>(args);
+    } else if num_bins == 81 {
+        println!("Detected model folder as LLaMa 65b.");
+        run::<modeling::Llama65b>(args);
+    } else {
+        panic!("Found {num_bins} .bin files in the model directory. Expected 33, 41, or 81.");
+    }
+}
+
+fn run<M: modeling::LlamaModel>(args: Cli) {
+    let mut pipeline = pipeline::LlamaPipeline::<M>::new(
         args.model,
         args.ram_limit_for_model,
         args.seed,

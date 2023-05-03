@@ -14,11 +14,11 @@ macro_rules! disk_tensor {
     }};
 }
 
-pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
+pub fn load_on_disk<M: modeling::LlamaModel>(root: String) -> modeling::LlamaForCausalLM<M> {
     let variance_epsilon = 1e-6;
-    let root = root.as_ref();
+    let root: &Path = root.as_ref();
     let model = root.join("model");
-    let layers = (0..modeling::NUM_LAYERS)
+    let layers = (0..M::NUM_LAYERS)
         .map(|i| model.join("layers").join(std::format!("{i}")))
         .map(|layer_root| modeling::DecoderLayer {
             self_attn: modeling::Attention {
@@ -67,7 +67,7 @@ macro_rules! maybe_load {
     };
 }
 
-impl super::modeling::RMSNorm {
+impl<M: modeling::LlamaModel> super::modeling::RMSNorm<M> {
     pub fn num_bytes(&self) -> usize {
         self.weight.num_bytes()
     }
@@ -89,7 +89,7 @@ impl super::modeling::RotaryEmbedding {
     }
 }
 
-impl super::modeling::Attention {
+impl<M: modeling::LlamaModel> super::modeling::Attention<M> {
     pub fn num_bytes(&self) -> usize {
         self.q_proj.num_bytes()
             + self.k_proj.num_bytes()
@@ -107,7 +107,7 @@ impl super::modeling::Attention {
     }
 }
 
-impl super::modeling::Mlp {
+impl<M: modeling::LlamaModel> super::modeling::Mlp<M> {
     pub fn num_bytes(&self) -> usize {
         self.gate_proj.num_bytes() + self.down_proj.num_bytes() + self.up_proj.num_bytes()
     }
@@ -120,7 +120,7 @@ impl super::modeling::Mlp {
     }
 }
 
-impl super::modeling::DecoderLayer {
+impl<M: modeling::LlamaModel> super::modeling::DecoderLayer<M> {
     pub fn num_bytes(&self) -> usize {
         self.self_attn.num_bytes()
             + self.mlp.num_bytes()
@@ -137,7 +137,7 @@ impl super::modeling::DecoderLayer {
     }
 }
 
-impl super::modeling::Llama {
+impl<M: modeling::LlamaModel> super::modeling::Llama<M> {
     pub fn num_bytes(&self) -> usize {
         self.embed_tokens.num_bytes()
             + self.layers.iter().map(|l| l.num_bytes()).sum::<usize>()
@@ -153,7 +153,7 @@ impl super::modeling::Llama {
     }
 }
 
-impl super::modeling::LlamaForCausalLM {
+impl<M: modeling::LlamaModel> super::modeling::LlamaForCausalLM<M> {
     pub fn num_bytes(&self) -> usize {
         self.llama.num_bytes() + self.lm_head.num_bytes()
     }
