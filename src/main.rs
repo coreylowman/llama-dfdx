@@ -78,6 +78,10 @@ struct Cli {
     /// the structure based on the contents of the `--model` directory.
     #[arg(long, default_value_t = Structure::Auto)]
     structure: Structure,
+
+    /// Whether to print out metrics after generation completes.
+    #[arg(long, default_value_t = true)]
+    show_metrics: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -151,21 +155,33 @@ fn run<M: modeling::LlamaModel>(args: Cli) {
 
     match args.command {
         Commands::Generate { prompt } => {
+            let start = std::time::Instant::now();
+            let mut num_tokens = 0;
             print!("{prompt}");
             for new_content in pipeline.generate(prompt) {
                 print!("{new_content}");
                 std::io::stdout().flush().unwrap();
+                num_tokens += 1;
             }
             println!();
+            if args.show_metrics {
+                print_metrics(start.elapsed(), num_tokens);
+            }
         }
         Commands::File { path } => {
+            let start = std::time::Instant::now();
+            let mut num_tokens = 0;
             let prompt = std::fs::read_to_string(path).unwrap();
             print!("{prompt}");
             for new_content in pipeline.generate(prompt) {
                 print!("{new_content}");
                 std::io::stdout().flush().unwrap();
+                num_tokens += 1;
             }
             println!();
+            if args.show_metrics {
+                print_metrics(start.elapsed(), num_tokens);
+            }
         }
         Commands::Chat => {
             let mut conversation = String::new();
@@ -180,25 +196,30 @@ fn run<M: modeling::LlamaModel>(args: Cli) {
 
                 let start = std::time::Instant::now();
 
-                let mut num_tokens_generated = 0;
+                let mut num_tokens = 0;
                 for new_content in pipeline.generate(prompt) {
                     print!("{}", &new_content);
                     conversation.push_str(&new_content);
                     std::io::stdout().flush().unwrap();
-                    num_tokens_generated += 1;
+                    num_tokens += 1;
                 }
                 println!();
-
-                let elapsed = start.elapsed();
-                let elapsed_s = elapsed.as_secs_f64();
-                let tokens_per_s = num_tokens_generated as f64 / elapsed_s;
-                let ms_per_token = 1000.0 * elapsed_s / num_tokens_generated as f64;
-
-                println!(
-                    "\n*Generated {} tokens in {:.3?} ({tokens_per_s:.3} tokens/s, {ms_per_token:.0} ms/token)*",
-                    num_tokens_generated, elapsed
-                );
+                if args.show_metrics {
+                    print_metrics(start.elapsed(), num_tokens);
+                }
             }
         }
     }
+}
+
+fn print_metrics(elapsed: std::time::Duration, num_tokens_generated: usize) {
+    let elapsed_s = elapsed.as_secs_f64();
+    let tokens_per_s = num_tokens_generated as f64 / elapsed_s;
+    let ms_per_token = 1000.0 * elapsed_s / num_tokens_generated as f64;
+
+    println!();
+    println!(
+        "*Generated {} tokens in {:.3?} ({tokens_per_s:.3} tokens/s, {ms_per_token:.0} ms/token)*",
+        num_tokens_generated, elapsed
+    );
 }
