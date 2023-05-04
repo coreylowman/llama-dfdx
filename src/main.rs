@@ -106,7 +106,12 @@ fn main() {
         Structure::Auto => {
             let num_bins = std::fs::read_dir(&args.model)
                 .expect("Model directory does not exist.")
-                .filter(|path| path.as_ref().unwrap().path().ends_with(".bin"))
+                .filter(|path| {
+                    let path = path.as_ref().unwrap().path();
+                    path.extension()
+                        .map(|ext| ext.to_str().unwrap() == "bin")
+                        .unwrap_or(false)
+                })
                 .count();
             if num_bins == 33 {
                 println!("Detected model folder as LLaMa 7b.");

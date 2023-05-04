@@ -5,8 +5,7 @@ import torch
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--src", help="root directory", default="llama-7b-hf")
-    parser.add_argument("--dst", help="output directory", default="llama-7b-hf")
+    parser.add_argument("src", help="root directory", default="llama-7b-hf")
     args = parser.parse_args()
 
     for f in os.listdir(args.src):
@@ -17,9 +16,9 @@ def main():
         for key, tensor in sd.items():
             print("Saving", key, tensor.shape, tensor.dtype)
             path = os.path.sep.join(key.split("."))
-            os.makedirs(os.path.join(args.dst, os.path.dirname(path)), exist_ok=True)
+            os.makedirs(os.path.join(args.src, os.path.dirname(path)), exist_ok=True)
             np_array = tensor.numpy()
-            with open(os.path.join(args.dst, path), "w") as fp:
+            with open(os.path.join(args.src, path), "w") as fp:
                 np_array.tofile(fp)
             del np_array
         del sd

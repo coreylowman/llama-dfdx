@@ -16,13 +16,19 @@ Uses [dfdx](https://github.com/coreylowman/dfdx) tensors and CUDA acceleration.
 ### Download model weights
 1. Install git lfs. On ubuntu you can run `sudo apt install git-lfs`
 2. Activate git lfs with `git lfs install`.
-3. Run `bash download.sh` to download the model weights in pytorch format (~25 GB)
+3. Run the following commands to download the model weights in pytorch format (~25 GB):
+    a. LLaMa 7b (~25 GB): `git clone https://huggingface.co/decapoda-research/llama-7b-hf`
+    b. LLaMa 13b (~75 GB): `git clone https://huggingface.co/decapoda-research/llama-13b-hf`
+    c. LLaMa 65b (~XX GB): `git clone https://huggingface.co/decapoda-research/llama-65b-hf`
 
 ### Convert the model
 1. (Optional) Run `python3.x -m venv <my_env_name>` to create a python virtual environment, where `x` is your prefered python version
 2. (Optional, requires 1.) Run `source <my_env_name>\bin\activate` (or `<my_env_name>\Scripts\activate` if on Windows) to activate the environment
 3. Run `pip install numpy torch`
-4. Run `python convert.py` to convert the model weights to rust understandable format
+4. Run `python convert.py` to convert the model weights to rust understandable format:
+    a. LLaMa 7b: `python convert.py`
+    b. LLaMa 13b: `python convert.py llama-13b-hf`
+    c. LLaMa 65b: `python convert.py llama-65b-hf`
 
 ## (Once) Compile
 
@@ -42,9 +48,9 @@ cargo build --release
 
 With default args:
 ```bash
-./target/release/llama-dfdx generate "<prompt>"
-./target/release/llama-dfdx chat
-./target/release/llama-dfdx file <path to prompt file>
+./target/release/llama-dfdx --model <model-dir> generate "<prompt>"
+./target/release/llama-dfdx --model <model-dir> chat
+./target/release/llama-dfdx --model <model-dir> file <path to prompt file>
 ```
 
 To see what commands/custom args you can use:
