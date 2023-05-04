@@ -21,9 +21,9 @@ Here is the 7b model running on an A10 GPU:
 1. Install git lfs. On ubuntu you can run `sudo apt install git-lfs`
 2. Activate git lfs with `git lfs install`.
 3. Run the following commands to download the model weights in pytorch format (~25 GB):
-    a. LLaMa 7b (~25 GB): `git clone https://huggingface.co/decapoda-research/llama-7b-hf`
-    b. LLaMa 13b (~75 GB): `git clone https://huggingface.co/decapoda-research/llama-13b-hf`
-    c. LLaMa 65b (~244 GB): `git clone https://huggingface.co/decapoda-research/llama-65b-hf`
+    1. LLaMa 7b (~25 GB): `git clone https://huggingface.co/decapoda-research/llama-7b-hf`
+    2. LLaMa 13b (~75 GB): `git clone https://huggingface.co/decapoda-research/llama-13b-hf`
+    3. LLaMa 65b (~244 GB): `git clone https://huggingface.co/decapoda-research/llama-65b-hf`
 
 ### Convert the model
 1. (Optional) Run `python3.x -m venv <my_env_name>` to create a python virtual environment, where `x` is your prefered python version
