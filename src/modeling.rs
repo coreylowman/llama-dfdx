@@ -93,8 +93,8 @@ impl RotaryEmbedding {
         let (sin, cos) = self.get_sincos(q.device(), offset, q.shape().2);
         let sin = sin.broadcast_like(&q);
         let cos = cos.broadcast_like(&q);
-        let q_embed = (q.clone() * cos.clone()) + (Self::rotate_half(q) * sin.clone());
-        let k_embed = (k.clone() * cos) + (Self::rotate_half(k) * sin);
+        let q_embed = (Self::rotate_half(q.clone()) * sin.clone()) + (q * cos.clone());
+        let k_embed = (Self::rotate_half(k.clone()) * sin) + (k * cos);
         (q_embed, k_embed)
     }
 
@@ -148,20 +148,10 @@ impl<M: LlamaModel> Attention<M> {
         Tensor<(Batch, CurSeq, M::Hidden), f16, Dev>,
         Cache<Batch, TotSeq, M>,
     ) {
-        let (batch, cur_seq, _) = *x.shape();
-        let past_seq = cache
-            .as_ref()
-            .map(|c| c.key.shape().2.size())
-            .unwrap_or_default();
-        if cache.is_some() {
-            assert_eq!(cur_seq.size(), 1);
-        }
-        let bsnh = (
-            batch,
-            cur_seq.size(),
-            M::NumHeads::default(),
-            Const::<HEAD_DIM>,
-        );
+        let shape = *x.shape();
+        let num_heads = M::NumHeads::default();
+        let past_seq = cache.as_ref().map(|c| c.key.shape().2.size()).unwrap_or(0);
+        let bsnh = (shape.0, shape.1.size(), num_heads, Const::<HEAD_DIM>);
         type Tr12 = Axes4<0, 2, 1, 3>;
 
         let q = {
@@ -183,7 +173,6 @@ impl<M: LlamaModel> Attention<M> {
         };
 
         let (q, k) = self.rotary_embed.forward(q, k, past_seq);
-
         let q = q.realize::<(_, _, CurSeq, _)>();
 
         let (k, v) = if let Some(cache) = cache {
@@ -208,10 +197,7 @@ impl<M: LlamaModel> Attention<M> {
         let w = w.to_dtype::<f32>().softmax::<Axis<3>>().to_dtype::<f16>();
 
         let o = w.matmul(v);
-        let o = o
-            .permute::<_, Tr12>()
-            .reshape_like(&(batch, cur_seq, M::Hidden::default()))
-            .unwrap();
+        let o = o.permute::<_, Tr12>().reshape_like(&shape).unwrap();
 
         let out_proj = self.o_proj.get_on(o.device());
         (o.matmul(out_proj.permute()), cache)
@@ -232,15 +218,16 @@ impl<M: LlamaModel> Mlp<M> {
     ) -> Tensor<(Batch, Seq, M::Hidden), f16, Dev> {
         let gate = {
             let gate_proj = self.gate_proj.get_on(x.device());
-            x.clone().matmul(gate_proj.permute())
+            let gate = x.clone().matmul(gate_proj.permute());
+            gate.clone().sigmoid() * gate
         };
         let up = {
             let up_proj = self.up_proj.get_on(x.device());
-            x.matmul(up_proj.permute())
+            let up = x.matmul(up_proj.permute());
+            up * gate
         };
-        let silu = up * (gate.clone() * gate.sigmoid());
-        let down_proj = self.down_proj.get_on(silu.device());
-        silu.matmul(down_proj.permute())
+        let down_proj = self.down_proj.get_on(up.device());
+        up.matmul(down_proj.permute())
     }
 }
 
@@ -265,7 +252,7 @@ impl<M: LlamaModel> DecoderLayer<M> {
         let residual = x.clone();
         let x = self.input_layer_norm.forward(x);
         let (x, cache) = self.self_attn.forward(x, attn_mask, cache);
-        let x = residual + x;
+        let x = x + residual;
         let residual = x.clone();
         let x = self.post_attention_layer_norm.forward(x);
         let x = self.mlp.forward(x);
