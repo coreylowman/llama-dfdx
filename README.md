@@ -9,6 +9,10 @@ Uses [dfdx](https://github.com/coreylowman/dfdx) tensors and CUDA acceleration.
 
 **This runs LLaMa directly in f16, meaning there is no hardware acceleration on CPU.** Using CUDA is heavily recommended.
 
+Here is the 7b model running on an A10 GPU:
+
+![](llama-7b-a10.gif)
+
 # How To Run
 
 ## (Once) Setting up model weights
