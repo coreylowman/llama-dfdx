@@ -111,8 +111,13 @@ impl<M: modeling::LlamaModel> LlamaPipeline<M> {
                 let new_token = if cfg.greedy {
                     sampling::greedy(vocab.to_dtype::<f32>().as_vec())
                 } else {
-                    let probs = (vocab.to_dtype::<f32>() / cfg.temperature).softmax::<Axis<1>>();
-                    sampling::top_p(probs.as_vec(), cfg.top_p, cfg.top_k, &mut self.rng)
+                    let probs = (vocab / cfg.temperature).softmax::<Axis<1>>();
+                    sampling::top_p(
+                        probs.to_dtype::<f32>().as_vec(),
+                        cfg.top_p,
+                        cfg.top_k,
+                        &mut self.rng,
+                    )
                 };
 
                 tokens.push(new_token);

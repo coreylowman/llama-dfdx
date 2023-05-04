@@ -79,9 +79,8 @@ struct Cli {
     #[arg(long, default_value_t = Structure::Auto)]
     structure: Structure,
 
-    /// Whether to print out metrics after generation completes.
-    #[arg(long, default_value_t = true)]
-    show_metrics: bool,
+    #[arg(long, default_value_t = false)]
+    bench: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -120,7 +119,7 @@ fn main() {
             if num_bins == 33 {
                 println!("Detected model folder as LLaMa 7b.");
                 run::<modeling::Llama7b>(args);
-            } else if num_bins == 41 {
+            } else if num_bins == 42 {
                 println!("Detected model folder as LLaMa 13b.");
                 run::<modeling::Llama13b>(args);
             } else if num_bins == 81 {
@@ -153,6 +152,12 @@ fn run<M: modeling::LlamaModel>(args: Cli) {
         },
     );
 
+    if args.bench {
+        let start = std::time::Instant::now();
+        pipeline.llama.transfer_to(&pipeline.device);
+        println!("Loaded weights in {:?}", start.elapsed());
+    }
+
     match args.command {
         Commands::Generate { prompt } => {
             let start = std::time::Instant::now();
@@ -164,7 +169,7 @@ fn run<M: modeling::LlamaModel>(args: Cli) {
                 num_tokens += 1;
             }
             println!();
-            if args.show_metrics {
+            if args.bench {
                 print_metrics(start.elapsed(), num_tokens);
             }
         }
@@ -179,7 +184,7 @@ fn run<M: modeling::LlamaModel>(args: Cli) {
                 num_tokens += 1;
             }
             println!();
-            if args.show_metrics {
+            if args.bench {
                 print_metrics(start.elapsed(), num_tokens);
             }
         }
@@ -204,7 +209,7 @@ fn run<M: modeling::LlamaModel>(args: Cli) {
                     num_tokens += 1;
                 }
                 println!();
-                if args.show_metrics {
+                if args.bench {
                     print_metrics(start.elapsed(), num_tokens);
                 }
             }
