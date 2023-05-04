@@ -7,6 +7,7 @@ use dfdx::{
     tensor_ops::*,
 };
 
+use super::modeling;
 use super::sampling;
 
 #[derive(Debug, Clone, Copy)]
@@ -19,17 +20,17 @@ pub struct LlamaConfig {
     pub top_k: usize,
 }
 
-pub struct LlamaPipeline {
+pub struct LlamaPipeline<M: modeling::LlamaModel> {
     pub cfg: LlamaConfig,
     pub device: super::modeling::Dev,
-    pub llama: super::modeling::LlamaForCausalLM,
+    pub llama: super::modeling::LlamaForCausalLM<M>,
     pub tokenizer: SentencePieceBpeTokenizer,
     pub bos_token: usize,
     pub eos_token: usize,
     pub rng: StdRng,
 }
 
-impl LlamaPipeline {
+impl<M: modeling::LlamaModel> LlamaPipeline<M> {
     pub fn new(
         model: String,
         ram_limit_for_model: Option<usize>,
@@ -39,7 +40,7 @@ impl LlamaPipeline {
         const MB: usize = 1_000_000;
 
         let rng = StdRng::seed_from_u64(seed);
-        let device = super::modeling::Dev::seed_from_u64(seed);
+        let device = modeling::Dev::seed_from_u64(seed);
 
         let mut llama = super::loading::load_on_disk(model.clone());
         let model_num_bytes = llama.num_bytes();
@@ -90,7 +91,7 @@ impl LlamaPipeline {
         // BOS token, since SentencePieceBpeTokenizer doesn't add it
         tokens.insert(0, self.bos_token);
 
-        let mut cache: Option<Vec<super::modeling::Cache<Const<1>, usize>>> = None;
+        let mut cache: Option<Vec<super::modeling::Cache<Const<1>, usize, M>>> = None;
 
         let cfg = self.cfg;
         (0..cfg.num_tokens)
@@ -110,8 +111,13 @@ impl LlamaPipeline {
                 let new_token = if cfg.greedy {
                     sampling::greedy(vocab.to_dtype::<f32>().as_vec())
                 } else {
-                    let probs = (vocab.to_dtype::<f32>() / cfg.temperature).softmax::<Axis<1>>();
-                    sampling::top_p(probs.as_vec(), cfg.top_p, cfg.top_k, &mut self.rng)
+                    let probs = (vocab / cfg.temperature).softmax::<Axis<1>>();
+                    sampling::top_p(
+                        probs.to_dtype::<f32>().as_vec(),
+                        cfg.top_p,
+                        cfg.top_k,
+                        &mut self.rng,
+                    )
                 };
 
                 tokens.push(new_token);

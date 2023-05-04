@@ -14,11 +14,11 @@ macro_rules! disk_tensor {
     }};
 }
 
-pub fn load_on_disk<P: AsRef<Path>>(root: P) -> modeling::LlamaForCausalLM {
+pub fn load_on_disk<M: modeling::LlamaModel>(root: String) -> modeling::LlamaForCausalLM<M> {
     let variance_epsilon = 1e-6;
-    let root = root.as_ref();
+    let root: &Path = root.as_ref();
     let model = root.join("model");
-    let layers = (0..modeling::NUM_LAYERS)
+    let layers = (0..M::NUM_LAYERS)
         .map(|i| model.join("layers").join(std::format!("{i}")))
         .map(|layer_root| modeling::DecoderLayer {
             self_attn: modeling::Attention {
@@ -67,7 +67,7 @@ macro_rules! maybe_load {
     };
 }
 
-impl super::modeling::RMSNorm {
+impl<M: modeling::LlamaModel> super::modeling::RMSNorm<M> {
     pub fn num_bytes(&self) -> usize {
         self.weight.num_bytes()
     }
@@ -75,6 +75,10 @@ impl super::modeling::RMSNorm {
     pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
         maybe_load!(max_bytes, self.weight);
         max_bytes
+    }
+
+    pub fn transfer_to(&mut self, device: &modeling::Dev) {
+        self.weight.move_to_ram(device);
     }
 }
 
@@ -87,9 +91,13 @@ impl super::modeling::RotaryEmbedding {
         maybe_load!(max_bytes, self.inv_freq);
         max_bytes
     }
+
+    pub fn transfer_to(&mut self, device: &modeling::Dev) {
+        self.inv_freq.move_to_ram(device);
+    }
 }
 
-impl super::modeling::Attention {
+impl<M: modeling::LlamaModel> super::modeling::Attention<M> {
     pub fn num_bytes(&self) -> usize {
         self.q_proj.num_bytes()
             + self.k_proj.num_bytes()
@@ -105,9 +113,17 @@ impl super::modeling::Attention {
         maybe_load!(max_bytes, self.o_proj);
         self.rotary_embed.deferred_load(max_bytes)
     }
+
+    pub fn transfer_to(&mut self, device: &modeling::Dev) {
+        self.q_proj.move_to_ram(device);
+        self.k_proj.move_to_ram(device);
+        self.v_proj.move_to_ram(device);
+        self.o_proj.move_to_ram(device);
+        self.rotary_embed.transfer_to(device);
+    }
 }
 
-impl super::modeling::Mlp {
+impl<M: modeling::LlamaModel> super::modeling::Mlp<M> {
     pub fn num_bytes(&self) -> usize {
         self.gate_proj.num_bytes() + self.down_proj.num_bytes() + self.up_proj.num_bytes()
     }
@@ -118,9 +134,15 @@ impl super::modeling::Mlp {
         maybe_load!(max_bytes, self.up_proj);
         max_bytes
     }
+
+    pub fn transfer_to(&mut self, device: &modeling::Dev) {
+        self.gate_proj.move_to_ram(device);
+        self.down_proj.move_to_ram(device);
+        self.up_proj.move_to_ram(device);
+    }
 }
 
-impl super::modeling::DecoderLayer {
+impl<M: modeling::LlamaModel> super::modeling::DecoderLayer<M> {
     pub fn num_bytes(&self) -> usize {
         self.self_attn.num_bytes()
             + self.mlp.num_bytes()
@@ -135,9 +157,16 @@ impl super::modeling::DecoderLayer {
         max_bytes = self.post_attention_layer_norm.deferred_load(max_bytes);
         max_bytes
     }
+
+    pub fn transfer_to(&mut self, device: &modeling::Dev) {
+        self.self_attn.transfer_to(device);
+        self.mlp.transfer_to(device);
+        self.input_layer_norm.transfer_to(device);
+        self.post_attention_layer_norm.transfer_to(device);
+    }
 }
 
-impl super::modeling::Llama {
+impl<M: modeling::LlamaModel> super::modeling::Llama<M> {
     pub fn num_bytes(&self) -> usize {
         self.embed_tokens.num_bytes()
             + self.layers.iter().map(|l| l.num_bytes()).sum::<usize>()
@@ -151,9 +180,16 @@ impl super::modeling::Llama {
         }
         self.norm.deferred_load(max_bytes)
     }
+
+    pub fn transfer_to(&mut self, device: &modeling::Dev) {
+        for layer in self.layers.iter_mut() {
+            layer.transfer_to(device);
+        }
+        self.norm.transfer_to(device);
+    }
 }
 
-impl super::modeling::LlamaForCausalLM {
+impl<M: modeling::LlamaModel> super::modeling::LlamaForCausalLM<M> {
     pub fn num_bytes(&self) -> usize {
         self.llama.num_bytes() + self.lm_head.num_bytes()
     }
@@ -161,5 +197,10 @@ impl super::modeling::LlamaForCausalLM {
     pub fn deferred_load(&mut self, mut max_bytes: usize) -> usize {
         maybe_load!(max_bytes, self.lm_head);
         self.llama.deferred_load(max_bytes)
+    }
+
+    pub fn transfer_to(&mut self, device: &modeling::Dev) {
+        self.lm_head.move_to_ram(device);
+        self.llama.transfer_to(device);
     }
 }

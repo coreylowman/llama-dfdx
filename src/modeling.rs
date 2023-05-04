@@ -10,33 +10,63 @@ use dfdx::{
 };
 
 pub const VOCAB: usize = 32_000;
-pub const HIDDEN: usize = 4096;
-pub const INTERMEDIATE: usize = 11008;
-pub const NUM_HEADS: usize = 32;
-pub const NUM_LAYERS: usize = 32;
-pub const HEAD_DIM: usize = HIDDEN / NUM_HEADS;
-pub const HEAD_DIM_OVER_2: usize = HEAD_DIM / 2;
+pub const HEAD_DIM: usize = 128;
+pub const HEAD_DIM_OVER_2: usize = 64;
+
+pub trait LlamaModel: Clone {
+    type Hidden: ConstDim;
+    type Intermediate: ConstDim;
+    type NumHeads: ConstDim;
+    const NUM_LAYERS: usize;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Llama7b;
+impl LlamaModel for Llama7b {
+    type Hidden = Const<4096>;
+    type Intermediate = Const<11008>;
+    type NumHeads = Const<32>;
+    const NUM_LAYERS: usize = 32;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Llama13b;
+impl LlamaModel for Llama13b {
+    type Hidden = Const<5120>;
+    type Intermediate = Const<13824>;
+    type NumHeads = Const<40>;
+    const NUM_LAYERS: usize = 40;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Llama65b;
+impl LlamaModel for Llama65b {
+    type Hidden = Const<8192>;
+    type Intermediate = Const<22016>;
+    type NumHeads = Const<64>;
+    const NUM_LAYERS: usize = 80;
+}
 
 pub use half::f16;
 pub type Dev = AutoDevice;
 
 #[derive(Debug, Clone)]
-pub struct Cache<Batch: Dim, Seq: Dim> {
-    pub key: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
-    pub val: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
+pub struct Cache<Batch: Dim, Seq: Dim, M: LlamaModel> {
+    pub key: Tensor<(Batch, M::NumHeads, Seq, Const<HEAD_DIM>), f16, Dev>,
+    pub val: Tensor<(Batch, M::NumHeads, Seq, Const<HEAD_DIM>), f16, Dev>,
 }
 
 #[derive(Debug)]
-pub struct RMSNorm {
-    pub weight: LazyTensor<(Const<HIDDEN>,), f16>,
+pub struct RMSNorm<M: LlamaModel> {
+    pub weight: LazyTensor<(M::Hidden,), f16>,
     pub variance_epsilon: f64,
 }
 
-impl RMSNorm {
+impl<M: LlamaModel> RMSNorm<M> {
     fn forward<Batch: Dim, Seq: Dim>(
         &mut self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev> {
+        x: Tensor<(Batch, Seq, M::Hidden), f16, Dev>,
+    ) -> Tensor<(Batch, Seq, M::Hidden), f16, Dev> {
         let x_f32 = x.to_dtype::<f32>();
         let var_f32 = x_f32.clone().square().mean::<_, Axis<2>>();
         let inv_std_f32 = (var_f32 + self.variance_epsilon as f32).sqrt().recip();
@@ -51,14 +81,14 @@ pub struct RotaryEmbedding {
 }
 
 impl RotaryEmbedding {
-    fn forward<Batch: Dim, Seq: Dim>(
+    fn forward<Batch: Dim, NumHeads: Dim, Seq: Dim>(
         &mut self,
-        q: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
-        k: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
+        q: Tensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>), f16, Dev>,
+        k: Tensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>), f16, Dev>,
         offset: usize,
     ) -> (
-        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
-        Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
+        Tensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>), f16, Dev>,
+        Tensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>), f16, Dev>,
     ) {
         let (sin, cos) = self.get_sincos(q.device(), offset, q.shape().2);
         let sin = sin.broadcast_like(&q);
@@ -90,9 +120,9 @@ impl RotaryEmbedding {
         )
     }
 
-    fn rotate_half<Batch: Dim, Seq: Dim>(
-        x: Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev>,
-    ) -> Tensor<(Batch, Const<NUM_HEADS>, Seq, Const<HEAD_DIM>), f16, Dev> {
+    fn rotate_half<Batch: Dim, NumHeads: Dim, Seq: Dim>(
+        x: Tensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>), f16, Dev>,
+    ) -> Tensor<(Batch, NumHeads, Seq, Const<HEAD_DIM>), f16, Dev> {
         let x1 = x.clone().slice((.., .., .., ..HEAD_DIM_OVER_2));
         let x2 = x.slice((.., .., .., HEAD_DIM_OVER_2..));
         (-x2, x1).concat_along(Axis::<3>).realize()
@@ -100,23 +130,23 @@ impl RotaryEmbedding {
 }
 
 #[derive(Debug)]
-pub struct Attention {
-    pub q_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, f16>,
-    pub k_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, f16>,
-    pub v_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, f16>,
-    pub o_proj: LazyTensor<Rank2<HIDDEN, HIDDEN>, f16>,
+pub struct Attention<M: LlamaModel> {
+    pub q_proj: LazyTensor<(M::Hidden, M::Hidden), f16>,
+    pub k_proj: LazyTensor<(M::Hidden, M::Hidden), f16>,
+    pub v_proj: LazyTensor<(M::Hidden, M::Hidden), f16>,
+    pub o_proj: LazyTensor<(M::Hidden, M::Hidden), f16>,
     pub rotary_embed: RotaryEmbedding,
 }
 
-impl Attention {
+impl<M: LlamaModel> Attention<M> {
     fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &mut self,
-        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
+        x: Tensor<(Batch, CurSeq, M::Hidden), f16, Dev>,
         attn_mask: Tensor<(CurSeq, TotSeq), f16, Dev>,
-        cache: Option<Cache<Batch, PastSeq>>,
+        cache: Option<Cache<Batch, PastSeq, M>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
-        Cache<Batch, TotSeq>,
+        Tensor<(Batch, CurSeq, M::Hidden), f16, Dev>,
+        Cache<Batch, TotSeq, M>,
     ) {
         let (batch, cur_seq, _) = *x.shape();
         let past_seq = cache
@@ -126,7 +156,12 @@ impl Attention {
         if cache.is_some() {
             assert_eq!(cur_seq.size(), 1);
         }
-        let bsnh = (batch, cur_seq.size(), Const::<NUM_HEADS>, Const::<HEAD_DIM>);
+        let bsnh = (
+            batch,
+            cur_seq.size(),
+            M::NumHeads::default(),
+            Const::<HEAD_DIM>,
+        );
         type Tr12 = Axes4<0, 2, 1, 3>;
 
         let q = {
@@ -175,7 +210,7 @@ impl Attention {
         let o = w.matmul(v);
         let o = o
             .permute::<_, Tr12>()
-            .reshape_like(&(batch, cur_seq, Const::<HIDDEN>))
+            .reshape_like(&(batch, cur_seq, M::Hidden::default()))
             .unwrap();
 
         let out_proj = self.o_proj.get_on(o.device());
@@ -184,17 +219,17 @@ impl Attention {
 }
 
 #[derive(Debug)]
-pub struct Mlp {
-    pub gate_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, f16>,
-    pub down_proj: LazyTensor<Rank2<HIDDEN, INTERMEDIATE>, f16>,
-    pub up_proj: LazyTensor<Rank2<INTERMEDIATE, HIDDEN>, f16>,
+pub struct Mlp<M: LlamaModel> {
+    pub gate_proj: LazyTensor<(M::Intermediate, M::Hidden), f16>,
+    pub down_proj: LazyTensor<(M::Hidden, M::Intermediate), f16>,
+    pub up_proj: LazyTensor<(M::Intermediate, M::Hidden), f16>,
 }
 
-impl Mlp {
+impl<M: LlamaModel> Mlp<M> {
     fn forward<Batch: Dim, Seq: Dim>(
         &mut self,
-        x: Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev>,
-    ) -> Tensor<(Batch, Seq, Const<HIDDEN>), f16, Dev> {
+        x: Tensor<(Batch, Seq, M::Hidden), f16, Dev>,
+    ) -> Tensor<(Batch, Seq, M::Hidden), f16, Dev> {
         let gate = {
             let gate_proj = self.gate_proj.get_on(x.device());
             x.clone().matmul(gate_proj.permute())
@@ -210,22 +245,22 @@ impl Mlp {
 }
 
 #[derive(Debug)]
-pub struct DecoderLayer {
-    pub self_attn: Attention,
-    pub mlp: Mlp,
-    pub input_layer_norm: RMSNorm,
-    pub post_attention_layer_norm: RMSNorm,
+pub struct DecoderLayer<M: LlamaModel> {
+    pub self_attn: Attention<M>,
+    pub mlp: Mlp<M>,
+    pub input_layer_norm: RMSNorm<M>,
+    pub post_attention_layer_norm: RMSNorm<M>,
 }
 
-impl DecoderLayer {
+impl<M: LlamaModel> DecoderLayer<M> {
     fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &mut self,
-        x: Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
+        x: Tensor<(Batch, CurSeq, M::Hidden), f16, Dev>,
         attn_mask: Tensor<(CurSeq, TotSeq), f16, Dev>,
-        cache: Option<Cache<Batch, PastSeq>>,
+        cache: Option<Cache<Batch, PastSeq, M>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
-        Cache<Batch, TotSeq>,
+        Tensor<(Batch, CurSeq, M::Hidden), f16, Dev>,
+        Cache<Batch, TotSeq, M>,
     ) {
         let residual = x.clone();
         let x = self.input_layer_norm.forward(x);
@@ -239,20 +274,20 @@ impl DecoderLayer {
 }
 
 #[derive(Debug)]
-pub struct Llama {
-    pub embed_tokens: LazyTensor<Rank2<VOCAB, HIDDEN>, f16>,
-    pub layers: Vec<DecoderLayer>,
-    pub norm: RMSNorm,
+pub struct Llama<M: LlamaModel> {
+    pub embed_tokens: LazyTensor<(Const<VOCAB>, M::Hidden), f16>,
+    pub layers: Vec<DecoderLayer<M>>,
+    pub norm: RMSNorm<M>,
 }
 
-impl Llama {
+impl<M: LlamaModel> Llama<M> {
     fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &mut self,
         input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
-        cache: Option<Vec<Cache<Batch, PastSeq>>>,
+        cache: Option<Vec<Cache<Batch, PastSeq, M>>>,
     ) -> (
-        Tensor<(Batch, CurSeq, Const<HIDDEN>), f16, Dev>,
-        Vec<Cache<Batch, TotSeq>>,
+        Tensor<(Batch, CurSeq, M::Hidden), f16, Dev>,
+        Vec<Cache<Batch, TotSeq, M>>,
     ) {
         let cur_seq = input_ids.shape().1;
         let past_seq = cache
@@ -295,19 +330,19 @@ impl Llama {
 }
 
 #[derive(Debug)]
-pub struct LlamaForCausalLM {
-    pub llama: Llama,
-    pub lm_head: LazyTensor<Rank2<VOCAB, HIDDEN>, f16>,
+pub struct LlamaForCausalLM<M: LlamaModel> {
+    pub llama: Llama<M>,
+    pub lm_head: LazyTensor<(Const<VOCAB>, M::Hidden), f16>,
 }
 
-impl LlamaForCausalLM {
+impl<M: LlamaModel> LlamaForCausalLM<M> {
     pub fn forward<Batch: Dim, CurSeq: Dim, PastSeq: Dim, TotSeq: Dim>(
         &mut self,
         input_ids: Tensor<(Batch, CurSeq), usize, Dev>,
-        cache: Option<Vec<Cache<Batch, PastSeq>>>,
+        cache: Option<Vec<Cache<Batch, PastSeq, M>>>,
     ) -> (
         Tensor<(Batch, CurSeq, Const<VOCAB>), f16, Dev>,
-        Vec<Cache<Batch, TotSeq>>,
+        Vec<Cache<Batch, TotSeq, M>>,
     ) {
         let (hidden_states, cache) = self.llama.forward(input_ids, cache);
         let lm_head = self.lm_head.get_on(hidden_states.device());

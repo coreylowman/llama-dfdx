@@ -53,6 +53,19 @@ impl<S: Shape, E: Unit> LazyTensor<S, E> {
         }
     }
 
+    pub fn move_to_ram<D: ZerosTensor<E> + TensorFromVec<E> + CopySlice<E>>(&mut self, device: &D) {
+        if let Self::Disk {
+            path: _,
+            shape: _,
+            move_to_ram,
+        } = self
+        {
+            if *move_to_ram {
+                self.get_on(device);
+            }
+        }
+    }
+
     pub fn get_on<D: ZerosTensor<E> + TensorFromVec<E> + CopySlice<E>>(
         &mut self,
         device: &D,
