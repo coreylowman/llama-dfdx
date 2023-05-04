@@ -19,7 +19,7 @@ Uses [dfdx](https://github.com/coreylowman/dfdx) tensors and CUDA acceleration.
 3. Run the following commands to download the model weights in pytorch format (~25 GB):
     a. LLaMa 7b (~25 GB): `git clone https://huggingface.co/decapoda-research/llama-7b-hf`
     b. LLaMa 13b (~75 GB): `git clone https://huggingface.co/decapoda-research/llama-13b-hf`
-    c. LLaMa 65b (~XX GB): `git clone https://huggingface.co/decapoda-research/llama-65b-hf`
+    c. LLaMa 65b (~244 GB): `git clone https://huggingface.co/decapoda-research/llama-65b-hf`
 
 ### Convert the model
 1. (Optional) Run `python3.x -m venv <my_env_name>` to create a python virtual environment, where `x` is your prefered python version
