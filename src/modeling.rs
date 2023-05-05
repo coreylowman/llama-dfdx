@@ -157,19 +157,19 @@ impl<M: LlamaModel> Attention<M> {
         let q = {
             let q_proj = self.q_proj.get_on(x.device());
             let q = x.clone().matmul(q_proj.permute());
-            q.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
+            q.reshape_like(&bsnh).permute::<_, Tr12>()
         };
 
         let k = {
             let k_proj = self.k_proj.get_on(x.device());
             let k = x.clone().matmul(k_proj.permute());
-            k.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
+            k.reshape_like(&bsnh).permute::<_, Tr12>()
         };
 
         let v = {
             let v_proj = self.v_proj.get_on(x.device());
             let v = x.matmul(v_proj.permute());
-            v.reshape_like(&bsnh).unwrap().permute::<_, Tr12>()
+            v.reshape_like(&bsnh).permute::<_, Tr12>()
         };
 
         let (q, k) = self.rotary_embed.forward(q, k, past_seq);
@@ -197,7 +197,7 @@ impl<M: LlamaModel> Attention<M> {
         let w = w.to_dtype::<f32>().softmax::<Axis<3>>().to_dtype::<f16>();
 
         let o = w.matmul(v);
-        let o = o.permute::<_, Tr12>().reshape_like(&shape).unwrap();
+        let o = o.permute::<_, Tr12>().reshape_like(&shape);
 
         let out_proj = self.o_proj.get_on(o.device());
         (o.matmul(out_proj.permute()), cache)
