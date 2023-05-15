@@ -4,9 +4,14 @@ mod modeling;
 mod pipeline;
 mod sampling;
 
-use std::io::Write;
+use std::{
+    io::{Read, Write},
+    path::Path,
+};
 
 use clap::{Parser, Subcommand, ValueEnum};
+
+use crate::modeling::LlamaModel;
 
 #[derive(ValueEnum, Debug, Clone)]
 enum Structure {
@@ -107,27 +112,42 @@ fn main() {
 
     match args.structure {
         Structure::Auto => {
-            let num_bins = std::fs::read_dir(&args.model)
-                .expect("Model directory does not exist.")
-                .filter(|path| {
-                    let path = path.as_ref().unwrap().path();
-                    path.extension()
-                        .map(|ext| ext.to_str().unwrap() == "bin")
-                        .unwrap_or(false)
-                })
-                .count();
-            if num_bins == 33 {
+            let model_dir: &Path = args.model.as_ref();
+            assert!(model_dir.is_dir(), "Model directory does not exist.");
+            let config_file = model_dir.join("config.json");
+            assert!(
+                config_file.is_file(),
+                "Model directory does not contain config.json.
+                Please use `--structure` to specify the model structure."
+            );
+            let mut f = std::fs::File::open(config_file).expect("Failed to open config.json");
+            let mut contents = String::new();
+            f.read_to_string(&mut contents).unwrap();
+            let contents = json::parse(&contents).expect("Failed to parse config.json");
+            let num_layers = match contents {
+                json::JsonValue::Object(obj) => {
+                    let num_layers = obj
+                        .get("num_hidden_layers")
+                        .expect("No num_hidden_layers in config.json");
+                    num_layers
+                        .as_usize()
+                        .expect("num_hidden_layers is not a number")
+                }
+                _ => panic!("Top level of config.json is not an object"),
+            };
+            if num_layers == modeling::Llama7b::NUM_LAYERS {
                 println!("Detected model folder as LLaMa 7b.");
                 run::<modeling::Llama7b>(args);
-            } else if num_bins == 42 {
+            } else if num_layers == modeling::Llama13b::NUM_LAYERS {
                 println!("Detected model folder as LLaMa 13b.");
                 run::<modeling::Llama13b>(args);
-            } else if num_bins == 81 {
+            } else if num_layers == modeling::Llama65b::NUM_LAYERS {
                 println!("Detected model folder as LLaMa 65b.");
                 run::<modeling::Llama65b>(args);
             } else {
                 panic!(
-                    "Found {num_bins} .bin files in the model directory. Expected 33, 41, or 81."
+                    "Unable to detect model structure based on number of layers (expected 32, 40, 80).
+                    Please use `--structure` to specify the model structure."
                 );
             }
         }
