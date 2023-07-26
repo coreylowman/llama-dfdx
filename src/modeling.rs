@@ -4,6 +4,7 @@ use super::lazy::LazyTensor;
 
 use dfdx::{
     data::Arange,
+    dtypes::*,
     shapes::*,
     tensor::{AutoDevice, Tensor, TriangleTensor, ZerosTensor},
     tensor_ops::*,
@@ -47,7 +48,6 @@ impl LlamaModel for Llama65b {
     const NUM_LAYERS: usize = 80;
 }
 
-pub use half::f16;
 pub type Dev = AutoDevice;
 
 #[derive(Debug, Clone)]

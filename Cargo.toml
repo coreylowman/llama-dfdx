@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-half = { git = "https://github.com/starkat99/half-rs.git", branch = "main", features = ["num-traits", "rand_distr"] }
 dfdx = { git = "https://github.com/coreylowman/dfdx.git", branch = "main", default-features = false, features = ["std", "fast-alloc", "f16"] }
 memmap2 = "0.5.10"
 clap = { version = "4.2.5", features = ["derive"] }
